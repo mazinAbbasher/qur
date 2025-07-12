@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">تفاصيل الطلب #{{ order.public_id }}</h5>
+        </div>
+        <div class="card-body">
+          <p><strong>نوع الطلب:</strong> {{ order.get_order_type_display }}</p>
+          <p><strong>تاريخ الإنشاء:</strong> {{ order.created_at|date:"Y-m-d H:i" }}</p>
+          <h6>المنتجات:</h6>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>المنتج</th>
+                <th>الكمية</th>
+                <th>السعر</th>
+                <th>الإجمالي</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for item in order.items.all %}
+              <tr>
+                <td>{{ item.product.name }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.product.price|floatformat:"0"|intcomma }} جنيه</td>
+                <td>{{ item.get_total|floatformat:"0"|intcomma }} جنيه</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="text-end fw-bold">الإجمالي الكلي: <span class="text-success">{{ order.total|floatformat:"0"|intcomma }} جنيه</span></p>
+          <a href="{% url 'panel:invoice_generate' order.pk %}" class="btn btn-primary">طباعة الفاتورة</a>
+          <a href="{% url 'panel:order_list' %}" class="btn btn-secondary">رجوع</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% load panel_extras %}
+{% block content %}
+<div class="container">
+  <h2>قائمة الفواتير</h2>
+  <form method="get" class="row g-2 mb-3">
+    <div class="col-md-3">
+      <input type="text" name="client" value="{{ request.GET.client }}" class="form-control" placeholder="بحث بالعميل...">
+    </div>
+    <div class="col-md-2">
+      <input type="text" name="invoice" value="{{ request.GET.invoice }}" class="form-control" placeholder="رقم الفاتورة...">
+    </div>
+    <div class="col-md-3">
+      <select name="status" class="form-select">
+        <option value="">كل الحالات</option>
+        <option value="paid" {% if request.GET.status == "paid" %}selected{% endif %}>مدفوعة</option>
+        <option value="unpaid" {% if request.GET.status == "unpaid" %}selected{% endif %}>غير مدفوعة</option>
+        <option value="partial" {% if request.GET.status == "partial" %}selected{% endif %}>مدفوعة جزئياً</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <button type="submit" class="btn btn-primary w-100">تصفية</button>
+    </div>
+  </form>
+  <table class="table table-bordered table-sm align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>رقم الفاتورة</th>
+        <th>العميل</th>
+        <th>الإجمالي</th>
+        <th>المدفوع</th>
+        <th>المتبقي</th>
+        <th>الاستحقاق</th>
+        <th>الحالة</th>
+        <th>تفاصيل</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for invoice in invoices %}
+      <tr>
+        <td>{{ invoice.pk|stringformat:"05d" }}</td>
+        <td>{{ invoice.sale.client.name }}</td>
+        <td>{{ invoice.total|floatformat:"2"|intcomma }} SDG</td>
+        <td>
+          <span class="text-success fw-bold">{{ invoice.paid_amount|floatformat:"2"|intcomma }} SDG</span>
+        </td>
+        <td>
+          <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success fw-bold{% endif %}">
+            {{ invoice.remaining_amount|floatformat:"2"|intcomma }} SDG
+          </span>
+        </td>
+        <td>
+          {{ invoice.due_date|date:"Y-m-d" }}
+          {% if invoice.due_date and invoice.due_date < today and invoice.status != 'paid' %}
+            <span title="متأخرة" style="color:#dc3545;font-size:1.2em;">&#9888;</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="badge 
+            {% if invoice.status == 'paid' %}bg-success
+            {% elif invoice.status == 'partial' %}bg-warning text-dark
+            {% else %}bg-danger{% endif %}"
+            title="{% if invoice.status == 'paid' %}تم دفع كامل المبلغ{% elif invoice.status == 'partial' %}تم دفع جزء من المبلغ{% else %}لم يتم دفع أي مبلغ{% endif %}">
+            {% if invoice.status == 'paid' %}مدفوعة
+            {% elif invoice.status == 'partial' %}مدفوعة جزئياً
+            {% else %}غير مدفوعة{% endif %}
+          </span>
+        </td>
+        <td>
+          <a href="{% url 'panel:invoice_detail' invoice.pk %}" class="btn btn-sm btn-outline-info">عرض</a>
+        </td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="8">لا توجد فواتير.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    {% if invoices %}
+    <tfoot>
+      <tr class="table-light">
+        <th colspan="2" class="text-end">الإجماليات:</th>
+        <th>
+          {{ invoices|sum:"total"|floatformat:"2"|intcomma }} SDG
+        </th>
+        <th>
+          {{ invoices|sum:"paid_amount"|floatformat:"2"|intcomma }} SDG
+        </th>
+        <th>
+          {{ invoices|sum:"remaining_amount"|floatformat:"2"|intcomma }} SDG
+        </th>
+        <th colspan="3"></th>
+      </tr>
+    </tfoot>
+    {% endif %}
+  </table>
+  {% if invoices.has_other_pages %}
+  <nav>
+    <ul class="pagination justify-content-center">
+      {% if invoices.has_previous %}
+        <li class="page-item"><a class="page-link" href="?{% if request.GET.client %}client={{ request.GET.client }}&{% endif %}{% if request.GET.invoice %}invoice={{ request.GET.invoice }}&{% endif %}{% if request.GET.status %}status={{ request.GET.status }}&{% endif %}page={{ invoices.previous_page_number }}">السابق</a></li>
+      {% endif %}
+      {% for num in invoices.paginator.page_range %}
+        {% if invoices.number == num %}
+          <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+        {% elif num > invoices.number|add:'-3' and num < invoices.number|add:'3' %}
+          <li class="page-item"><a class="page-link" href="?{% if request.GET.client %}client={{ request.GET.client }}&{% endif %}{% if request.GET.invoice %}invoice={{ request.GET.invoice }}&{% endif %}{% if request.GET.status %}status={{ request.GET.status }}&{% endif %}page={{ num }}">{{ num }}</a></li>
+        {% endif %}
+      {% endfor %}
+      {% if invoices.has_next %}
+        <li class="page-item"><a class="page-link" href="?{% if request.GET.client %}client={{ request.GET.client }}&{% endif %}{% if request.GET.invoice %}invoice={{ request.GET.invoice }}&{% endif %}{% if request.GET.status %}status={{ request.GET.status }}&{% endif %}page={{ invoices.next_page_number }}">التالي</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+</div>
+{% endblock %}

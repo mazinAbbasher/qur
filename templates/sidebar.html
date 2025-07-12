@@ -1,0 +1,148 @@
+{% load static %}
+<hr class="horizontal light mt-0 mb-2">
+<div class="collapse navbar-collapse  w-auto " id="sidenav-collapse-main">
+  <ul class="navbar-nav">
+
+    {# Admin Section #}
+    {% comment %} {% if request.user.is_superuser or request.user.role == 'admin' %} {% endcomment %}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'dashboard' %}active bg-gradient-info{% endif %}" href="{% url 'panel:index' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/home.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">التقارير</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'sales' %}active bg-gradient-info{% endif %}" href="{% url 'panel:sale_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/sales.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">المبيعات</span>
+      </a>
+    </li>
+     {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'invoices' %}active bg-gradient-info{% endif %}" href="{% url 'panel:invoice_list' %}">
+        ...
+      </a>
+    </li>  {% endcomment %}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'expenses' %}active bg-gradient-info{% endif %}" href="{% url 'panel:expense_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/expenses.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">المصروفات</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'employees' %}active bg-gradient-info{% endif %}" href="{% url 'panel:employee_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/employee.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">المناديب</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'shipments' %}active bg-gradient-info{% endif %}" href="{% url 'panel:shipment_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/shipment.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">الشحنات</span>
+      </a>
+    </li>
+   
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'products' %}active bg-gradient-info{% endif %}" href="{% url 'panel:product_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/products2.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">المنتجات</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'clients' %}active bg-gradient-info{% endif %}" href="{% url 'panel:client_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/client.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">العملاء</span>
+      </a>
+    </li>
+   
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'areas' %}active bg-gradient-info{% endif %}" href="{% url 'panel:area_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/region.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">المناطق</span>
+      </a>
+    </li>
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'suppliers' %}active bg-gradient-info{% endif %}" href="{% url 'panel:supplier_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/supplier.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">الموردين</span>
+      </a>
+    </li>
+  
+    {% comment %} {% endif %} {% endcomment %}
+
+    {# Sales Section #}
+    {% comment %} {% if request.user.is_superuser or request.user.role in 'admin sales' %} {% endcomment %}
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'orders' %}active bg-gradient-info{% endif %}" href="{% url 'panel:order_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/orders.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">الطلبات</span>
+      </a>
+    </li> {% endcomment %}
+  
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'sales_list' %}active bg-gradient-info{% endif %}" href="{% url 'panel:sale_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/sales.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">قائمة المبيعات</span>
+      </a>
+    </li> {% endcomment %}
+   
+    {% comment %} {% endif %} {% endcomment %}
+
+    {# Inventory Section #}
+    {% comment %} {% if request.user.is_superuser or request.user.role in 'admin inventory accountant' %} {% endcomment %}
+   
+    {% comment %} {% endif %} {% endcomment %}
+
+    {# Accounting Section #}
+    {% comment %} {% if request.user.is_superuser or request.user.role in 'admin accountant' %} {% endcomment %}
+    
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'commissions' %}active bg-gradient-info{% endif %}" href="{% url 'panel:sale_commissions' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/commission.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">العمولات</span>
+      </a>
+    </li> {% endcomment %}
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'net_profit' %}active bg-gradient-info{% endif %}" href="{% url 'panel:net_profit_dashboard' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/profit.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">صافي الربح</span>
+      </a>
+    </li> {% endcomment %}
+    {% comment %} {% endif %} {% endcomment %}
+
+    {# Reports Section (all roles) #}
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'reports' %}active bg-gradient-info{% endif %}" href="{% url 'panel:reports' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/reports.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">التقارير</span>
+      </a>
+    </li> {% endcomment %}
+  </ul>
+</div>

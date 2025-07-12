@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">
+            {% if shipment %}تعديل الشحنة{% else %}إضافة شحنة جديدة{% endif %}
+          </h5>
+        </div>
+        {% if messages %}
+        <ul class="messages">
+          {% for message in messages %}
+            <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {# Make product field disabled #}
+            <div class="mb-3">
+              {{ form.supplier|as_crispy_field|safe }}
+              {{ form.product|as_crispy_field|safe }}
+              {% if shipment %}
+              <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                  var prod = document.querySelector('[name="{{ form.product.name }}"]');
+                  if (prod) prod.setAttribute('disabled', 'disabled');
+                });
+              </script>
+              {% endif %}
+            </div>
+            {{ form.quantity|as_crispy_field }}
+            {{ form.cost_usd|as_crispy_field }}
+            {{ form.cost_sdg|as_crispy_field }}
+            {{ form.sale_usd|as_crispy_field }}
+            {{ form.shipment_cost|as_crispy_field }}
+            {{ form.batch_number|as_crispy_field }}
+            {{ form.expiry_date|as_crispy_field }}
+            <button type="submit" class="btn btn-success">
+              {% if shipment %}تحديث{% else %}إضافة{% endif %}
+            </button>
+            <a href="{% url 'panel:shipment_list' %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

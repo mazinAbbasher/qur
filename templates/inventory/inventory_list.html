@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">المخزون - الدفعات</h5>
+          {# Removed "إضافة دفعة جديدة" button #}
+        </div>
+        <div class="card-body">
+          <div class="table-responsive">
+            <table class="table align-middle table-bordered">
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>رقم التشغيلة</th>
+                  <th>تاريخ الانتهاء</th>
+                  <th>الكمية</th>
+                  {# Removed إجراءات column #}
+                </tr>
+              </thead>
+              <tbody>
+                {% for inv in inventories %}
+                <tr>
+                  <td>{{ inv.product.name }}</td>
+                  <td>{{ inv.shipment.batch_number }}</td>
+                  <td>{{ inv.shipment.expiry_date }}</td>
+                  <td>{{ inv.quantity }}</td>
+                  {# Removed edit/delete buttons #}
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted">لا توجد دفعات في المخزون.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if inventories.has_other_pages %}
+          <nav>
+            <ul class="pagination justify-content-center">
+              {% if inventories.has_previous %}
+              <li class="page-item"><a class="page-link" href="?page={{ inventories.previous_page_number }}{% if search %}&search={{ search }}{% endif %}">السابق</a></li>
+              {% endif %}
+              <li class="page-item active"><span class="page-link">{{ inventories.number }}</span></li>
+              {% if inventories.has_next %}
+              <li class="page-item"><a class="page-link" href="?page={{ inventories.next_page_number }}{% if search %}&search={{ search }}{% endif %}">التالي</a></li>
+              {% endif %}
+            </ul>
+          </nav>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

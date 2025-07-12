@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4>العمولات</h4>
+    </div>
+  </div>
+  <form method="get" class="mb-3">
+    <div class="row">
+      <div class="col-md-4">
+        <label for="date" class="form-label">تصفية حسب التاريخ</label>
+        <input type="date" class="form-control" id="date" name="date" value="{{ selected_date|default:'' }}" onchange="this.form.submit()">
+      </div>
+    </div>
+  </form>
+  <div class="card shadow">
+    <div class="card-body">
+      {% regroup commissions by employee as employee_commissions %}
+      {% for group in employee_commissions %}
+        <div class="mb-4">
+          <h5 class="text-primary">{{ group.grouper.name }}</h5>
+          <table class="table table-bordered">
+            <thead>
+              <tr>
+                <th>العملية</th>
+                <th>المبلغ الكلي للبيع</th>
+                <th>العمولة</th>
+                <th>تاريخ البيع</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% with total=0 %}
+              {% for commission in group.list %}
+                <tr>
+                  <td>#{{ commission.sale.pk }}</td>
+                  <td>{{ commission.sale.total|floatformat:"2"|intcomma }}</td>
+                  <td>{{ commission.amount|floatformat:"2"|intcomma }}</td>
+                  <td>{{ commission.sale.created_at|date:"Y-m-d" }}</td>
+                </tr>
+                {% widthratio commission.amount 1 1 as commission_value %}
+                {% with total=total|add:commission_value %}
+                {% endwith %}
+              {% endfor %}
+              <tr class="table-info">
+                <td colspan="2" class="text-end"><strong>إجمالي عمولة المندوب</strong></td>
+                <td colspan="2"><strong>{{ group.list|sum:"amount"|floatformat:"2"|intcomma }}</strong></td>
+              </tr>
+              {% endwith %}
+            </tbody>
+          </table>
+        </div>
+      {% empty %}
+        <p class="text-muted">لا توجد عمولات.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

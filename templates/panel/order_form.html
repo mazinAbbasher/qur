@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex align-items-center justify-content-between">
+          <h5 class="mb-0 text-white">إنشاء طلب جديد</h5>
+          <span class="badge bg-light text-info fs-6" id="orderTypeBadge" style="display:none;"></span>
+        </div>
+        <div class="card-body">
+          {% if messages %}
+            <div class="mb-3">
+              {% for message in messages %}
+                <div class="alert alert-{{ message.tags|default:'danger' }} mb-2">{{ message }}</div>
+              {% endfor %}
+            </div>
+          {% endif %}
+          <form method="post" id="orderForm" autocomplete="off">
+            {% csrf_token %}
+            <div class="row">
+              <div class="col-12">
+                <div class="mb-3">
+                  <label for="order_type" class="form-label">نوع الطلب</label>
+                  <select class="form-select custom-select" id="order_type" name="order_type" required>
+                    <option value="dinein" selected>محلي</option>
+                    <option value="takeaway">سفري</option>
+                    <option value="delivery">توصيل</option>
+                  </select>
+                </div>
+                <div class="mb-3 position-relative" style="z-index:2;">
+                  <input type="text" class="form-control pe-5" id="productSearch" placeholder="ابحث عن منتج..." autocomplete="off" style="background: #f8fafc; border: 1.5px solid #38bdf8; border-radius: 8px; box-shadow: 0 1px 8px 0 rgba(56,189,248,0.06); transition: border 0.18s, box-shadow 0.18s;">
+                  <button type="button" id="clearSearchBtn" class="btn btn-link position-absolute top-50 end-0 translate-middle-y me-2 px-1 py-0" style="display:none; font-size:1.3rem; color:#38bdf8; background:transparent; border:none; z-index:3;" tabindex="-1" aria-label="مسح البحث">
+                    &times;
+                  </button>
+                </div>
+                <div class="table-responsive" style="max-height: 400px;">
+                  <table class="table align-middle" id="productsTable">
+                    <thead class="table-light">
+                      <tr>
+                        <th>المنتج</th>
+                        <th>السعر</th>
+                        <th class="text-center">الكمية</th>
+                        <th>الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for product in products %}
+                      <tr data-product-row data-name="{{ product.name|lower }}">
+                        <td>
+                          <div class="d-flex align-items-center">
+                            <!-- Placeholder for product image -->
+                            {% comment %} <div class="me-2" style="width:36px;height:36px;background:#f2f2f2;border-radius:8px;display:flex;align-items:center;justify-content:center;"> {% endcomment %}
+                              {% comment %} <i class="bi bi-cup-hot" style="font-size:1.3rem;color:#bbb;"></i> {% endcomment %}
+                            </div>
+                            <span>{{ product.name }}</span>
+                          </div>
+                        </td>
+                        <td class="product-price" data-price="{{ product.price|floatformat:"0" }}">{{ product.price|floatformat:"0"|intcomma }} جنيه</td>
+                        <td class="text-center">
+                          <div class="input-group input-group-sm justify-content-center qty-group" style="max-width:110px;">
+                            <button type="button" class="btn btn-outline-secondary btn-qty btn-qty-m" data-action="decrement" tabindex="-1"><i class="bi bi-dash"></i></button>
+                            <input type="number" name="product_{{ product.pk }}" min="0" value="0" class="form-control product-qty text-center no-spinner" style="width: 50px;" readonly>
+                            <button type="button" class="btn btn-outline-secondary btn-qty btn-qty-p" data-action="increment" tabindex="-1"><i class="bi bi-plus"></i></button>
+                          </div>
+                        </td>
+                        <td class="product-total">0 جنيه</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <th class="text-end" colspan="3">الإجمالي الكلي:</th>
+                        <th id="grandTotal">0 جنيه</th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                <button type="submit" class="btn btn-success mt-3" id="submitBtn" disabled>
+                  <i class="bi bi-cart-check"></i> إنشاء الطلب
+                </button>
+                <a href="{% url 'panel:order_list' %}" class="btn btn-secondary mt-3">إلغاء</a>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Bootstrap Icons CDN (for cup, plus, minus, cart) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+<style>
+/* Hide default number input spinner for all browsers */
+input[type=number].no-spinner::-webkit-inner-spin-button, 
+input[type=number].no-spinner::-webkit-outer-spin-button { 
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number].no-spinner {
+  -moz-appearance: textfield;
+}
+/* Better plus/minus button feedback */
+.qty-group .btn-qty:active, .qty-group .btn-qty.active {
+  background-color:rgb(55, 83, 241);
+  border-color:rgb(255, 0, 0);
+}
+.qty-group .btn-qty:focus {
+  box-shadow: 0 0 0 0.15remrgba(0, 255, 128, 0.2);
+}
+.qty-group .btn-qty {
+  user-select: none;
+  
+}
+.qty-group .btn-qty-p {
+  background-color: #22c55e; /* Modern green */
+  color: #fff;
+  border-radius: 0 8px 8px 0;
+  border: none;
+  box-shadow: 0 2px 8px 0 rgba(34,197,94,0.08);
+  padding: 0.45rem 1.1rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
+  outline: none;
+  cursor: pointer;
+}
+.qty-group .btn-qty-p:hover, .qty-group .btn-qty-p:focus {
+  background-color: #16a34a;
+  transform: translateY(-2px) scale(1.04);
+}
+.qty-group .btn-qty-p:hover .bi-plus,
+.qty-group .btn-qty-p:focus .bi-plus {
+  color: #fff !important;
+}
+
+.qty-group .btn-qty-m {
+  background-color: #ef4444; /* Modern red */
+  color: #fff;
+  border-radius: 8px 0 0 8px;
+  border: none;
+  box-shadow: 0 2px 8px 0 rgba(239,68,68,0.08);
+  padding: 0.45rem 1.1rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  transition: background 0.18s, box-shadow 0.18s, transform 0.12s;
+  outline: none;
+  cursor: pointer;
+}
+.qty-group .btn-qty-m:hover, .qty-group .btn-qty-m:focus {
+  background-color: #b91c1c;
+  box-shadow: 0 4px 16px 0 rgba(239,68,68,0.16);
+  transform: translateY(-2px) scale(1.04);
+}
+.qty-group .btn-qty-m:hover .bi-dash,
+.qty-group .btn-qty-m:focus .bi-dash {
+  color: #fff !important;
+}
+
+/* Make table and rows more compact */
+#productsTable {
+  font-size: 0.92rem;
+}
+#productsTable th, #productsTable td {
+  padding-top: 0.35rem !important;
+  padding-bottom: 0.35rem !important;
+  padding-left: 0.5rem !important;
+  padding-right: 0.5rem !important;
+  vertical-align: middle;
+}
+#productsTable .input-group.qty-group {
+  max-width: 85px !important;
+}
+#productsTable .product-qty {
+  width: 36px !important;
+  font-size: 0.95rem;
+  padding: 0.15rem 0.2rem;
+  height: 28px;
+}
+#productsTable .btn-qty {
+  padding: 0.25rem 0.6rem !important;
+  font-size: 1rem !important;
+  min-width: 28px;
+  height: 28px;
+}
+#productsTable .btn-qty-p, 
+#productsTable .btn-qty-m {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+#productsTable .btn-qty-p {
+  background-color: #22c55e;
+}
+#productsTable .btn-qty-m {
+  background-color: #ef4444;
+}
+#productsTable .btn-qty-p:hover, #productsTable .btn-qty-p:focus {
+  background-color: #16a34a;
+}
+#productsTable .btn-qty-m:hover, #productsTable .btn-qty-m:focus {
+  background-color: #b91c1c;
+}
+#productsTable .product-total, 
+#productsTable .product-price {
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+#productsTable tbody tr {
+  height: 36px;
+}
+#productsTable thead th, #productsTable tfoot th {
+  font-size: 1rem;
+  padding-top: 0.4rem !important;
+  padding-bottom: 0.4rem !important;
+}
+
+/* Reduce margin for search input */
+#productSearch {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  padding: 0.35rem 2.2rem 0.35rem 0.6rem; /* right padding for clear btn */
+  height: 38px;
+  background: #f8fafc;
+  border: 1.5px solid #38bdf8;
+  border-radius: 8px;
+  box-shadow: 0 1px 8px 0 rgba(56,189,248,0.06);
+  transition: border 0.18s, box-shadow 0.18s;
+}
+#productSearch:focus {
+  border-color: #0ea5e9;
+  box-shadow: 0 2px 12px 0 rgba(14,165,233,0.10);
+  background: #fff;
+}
+#clearSearchBtn {
+  outline: none;
+  border: none;
+  background: transparent;
+  color: #38bdf8;
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.16s;
+}
+#clearSearchBtn:hover, #clearSearchBtn:focus {
+  color: #0ea5e9;
+  background: #e0f2fe;
+  border-radius: 50%;
+}
+#clearSearchBtn:active {
+  color: #0369a1;
+  background: #bae6fd;
+}
+/* Reduce card padding */
+.card-body {
+  padding: 1rem 1rem 1rem 1rem !important;
+}
+
+/* Custom select styling */
+.custom-select {
+  border-radius: 10px !important;
+  border: 1.8px solid #38bdf8 !important;
+  background: #f8fafc !important;
+  box-shadow: 0 2px 12px 0 rgba(56,189,248,0.08);
+  font-size: 1.08rem;
+  padding: 0.55rem 2.5rem 0.55rem 1.2rem;
+  transition: border 0.18s, box-shadow 0.18s, background 0.18s;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  color: #222;
+  outline: none;
+  min-width: 140px;
+  height: 46px;
+  font-weight: 500;
+  position: relative;
+  background-image:
+    url("data:image/svg+xml,%3Csvg width='18' height='18' fill='none' stroke='%230ea5e9' stroke-width='2' viewBox='0 0 18 18'%3E%3Cpath d='M5 7l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: left 1.1rem center;
+  background-size: 1.2em;
+}
+.custom-select:focus, .custom-select:hover {
+  border-color: #0ea5e9 !important;
+  box-shadow: 0 4px 18px 0 rgba(14,165,233,0.13);
+  background: #fff !important;
+}
+.custom-select:active {
+  border-color: #0369a1 !important;
+}
+.custom-select:disabled {
+  background: #e5e7eb !important;
+  color: #aaa !important;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* Option styling (limited by browser support) */
+.custom-select option {
+  background: #f0f9ff !important;
+  color: #222 !important;
+  font-size: 1.08rem;
+  padding: 0.7rem 1.2rem;
+  border-radius: 8px;
+  font-weight: 500;
+  transition: background 0.18s, color 0.18s;
+}
+.custom-select option:checked, 
+.custom-select option:focus, 
+.custom-select option:hover {
+  background: #bae6fd !important;
+  color: #0ea5e9 !important;
+  font-weight: 700;
+}
+
+/* Remove default arrow for select in IE/Edge */
+.custom-select::-ms-expand {
+  display: none;
+}
+
+/* Add a subtle shadow on open (Chrome only) */
+.custom-select:focus-visible {
+  box-shadow: 0 0 0 2px #bae6fd;
+}
+</style>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Product search/filter
+  const searchInput = document.getElementById('productSearch');
+  const clearBtn = document.getElementById('clearSearchBtn');
+  searchInput.addEventListener('input', function() {
+    const val = this.value.trim().toLowerCase();
+    document.querySelectorAll('tr[data-product-row]').forEach(function(row) {
+      row.style.display = row.dataset.name.includes(val) ? '' : 'none';
+    });
+    clearBtn.style.display = val ? '' : 'none';
+  });
+  clearBtn.addEventListener('click', function() {
+    searchInput.value = '';
+    searchInput.dispatchEvent(new Event('input'));
+    searchInput.focus();
+  });
+
+  // Improved plus/minus buttons for quantity
+  function changeQty(input, delta) {
+    let val = parseInt(input.value) || 0;
+    val += delta;
+    if (val < 0) val = 0;
+    input.value = val;
+    input.dispatchEvent(new Event('input'));
+  }
+
+  let intervalId = null;
+  document.querySelectorAll('.btn-qty').forEach(function(btn) {
+    const input = btn.parentElement.querySelector('.product-qty');
+    btn.addEventListener('mousedown', function(e) {
+      btn.classList.add('active');
+      changeQty(input, btn.dataset.action === 'increment' ? 1 : -1);
+      intervalId = setTimeout(function repeat() {
+        changeQty(input, btn.dataset.action === 'increment' ? 1 : -1);
+        intervalId = setTimeout(repeat, 80);
+      }, 400);
+    });
+    btn.addEventListener('mouseup', function() {
+      btn.classList.remove('active');
+      clearTimeout(intervalId);
+    });
+    btn.addEventListener('mouseleave', function() {
+      btn.classList.remove('active');
+      clearTimeout(intervalId);
+    });
+    btn.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      btn.classList.add('active');
+      changeQty(input, btn.dataset.action === 'increment' ? 1 : -1);
+      intervalId = setTimeout(function repeat() {
+        changeQty(input, btn.dataset.action === 'increment' ? 1 : -1);
+        intervalId = setTimeout(repeat, 80);
+      }, 400);
+    }, {passive: false});
+    btn.addEventListener('touchend', function() {
+      btn.classList.remove('active');
+      clearTimeout(intervalId);
+    });
+    // Remove the following click handler to prevent double increment/decrement
+    // btn.addEventListener('click', function(e) {
+    //   // Prevent double increment on click after mousedown
+    //   if (e.detail === 0) return;
+    //   changeQty(input, btn.dataset.action === 'increment' ? 1 : -1);
+    // });
+  });
+
+  // Helper to add commas to numbers
+  function intcomma(x) {
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  // Live update totals
+  function updateTotals() {
+    let grandTotal = 0;
+    let anySelected = false;
+    document.querySelectorAll('tr[data-product-row]').forEach(function(row) {
+      const price = parseFloat(row.querySelector('.product-price').dataset.price);
+      const qtyInput = row.querySelector('.product-qty');
+      const qty = parseInt(qtyInput.value) || 0;
+      const total = price * qty;
+      // Show as integer with comma
+      row.querySelector('.product-total').textContent = total > 0 ? intcomma(Math.round(total)) + ' جنيه' : '0 جنيه';
+      if (qty > 0) {
+        row.classList.add('table-success');
+        anySelected = true;
+      } else {
+        row.classList.remove('table-success');
+      }
+      grandTotal += total;
+    });
+    document.getElementById('grandTotal').textContent = intcomma(Math.round(grandTotal)) + ' جنيه';
+    document.getElementById('submitBtn').disabled = !anySelected;
+  }
+  document.querySelectorAll('.product-qty').forEach(function(input) {
+    input.addEventListener('input', updateTotals);
+  });
+  updateTotals();
+
+  // Show order type badge
+  document.getElementById('order_type').addEventListener('change', function() {
+    const badge = document.getElementById('orderTypeBadge');
+    let txt = '';
+    if (this.value === 'dinein') txt = 'محلي';
+    else if (this.value === 'takeaway') txt = 'سفري';
+    else if (this.value === 'delivery') txt = 'توصيل';
+    badge.textContent = txt;
+    badge.style.display = txt ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}

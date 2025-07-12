@@ -1,0 +1,154 @@
+{% load static %}
+{% load sidebar %}
+<!DOCTYPE html>
+<html  dir="rtl" >
+
+<head>
+
+<style>
+    .messages {
+        list-style-type: none;
+        padding: 0; 
+    }
+    
+    .alert {
+        padding: 15px;
+        margin: 10px 0;
+        border-radius: 5px;
+        color: #fff;
+        transition: opacity 0.5s ease;
+        color : #fff !important;
+    }
+    
+    .alert-success {
+        background-color: #28a745; /* Green */
+    }
+    
+    .alert-error {
+        background-color: #dc3545 !important;/* Red */
+    }
+    
+    .alert-info {
+        background-color: #17a2b8; /* Blue */
+    }
+    
+    .alert-warning {
+        background-color: #ffc107; /* Yellow */
+    }
+    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link rel="icon" type="image/png" href="{% static "assets/img/favicon.png" %}">
+  <title>
+Equatorial</title>
+  <!--     Fonts and icons     -->
+  {% comment %} <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Noto+Kufi+Arabic" /> {% endcomment %}
+  <!-- Nucleo Icons -->
+  <link href="{% static "assets/css/nucleo-icons.css" rel="stylesheet" %}">
+  <link href="{% static "assets/css/nucleo-svg.css" rel="stylesheet" %}">
+  <!-- Font Awesome Icons -->
+  {% comment %} <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script> {% endcomment %}
+  <!-- Material Icons -->
+
+  {% comment %} <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet"> {% endcomment %}
+
+  {% comment %} <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet"> {% endcomment %}
+  <!-- CSS Files -->
+  <link  href="{% static "assets/css/tailwind.min.css" %}" rel="stylesheet" />
+  <link id="pagestyle" href="{% static "assets/css/material-dashboard.css" %}" rel="stylesheet" />
+  <!-- Nepcha Analytics (nepcha.com) -->
+  <!-- Nepcha is a easy-to-use web analytics. No cookies and fully compliant with GDPR, CCPA and PECR. -->
+  {% comment %} <script defer data-site="YOUR_DOMAIN_HERE" src="https://api.nepcha.com/js/nepcha-analytics.js"></script> {% endcomment %}
+</head>
+
+<body class="g-sidenav-show rtl bg-gray-200">
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-2 fixed-end me-3 rotate-caret  bg-gradient-dark" id="sidenav-main">    <div class="sidenav-header">
+      <i class="fas fa-times p-3 cursor-pointer text-white opacity-5 position-absolute start-0 top-0 d-none d-xl-none" aria-hidden="true" id="iconSidenav"></i>
+      <a class="navbar-brand m-0" href="#">
+        <span class="ms-1 font-weight-bold text-white">Equatorial</span>
+      </a>
+    </div>
+    
+    {% sidebar %}
+    
+   
+  </aside>
+  <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg ">
+    <!-- Navbar -->
+    <nav class="navbar navbar-main navbar-expand-lg px-0 mx-4 shadow-none border-radius-xl" id="navbarBlur" data-scroll="true">
+        <div class="container-fluid py-1 px-3">
+        <div class="collapse navbar-collapse mt-sm-0 mt-2 me-md-0 me-sm-4" id="navbar">
+            <ul class="navbar-nav  justify-content-end">
+                <li class="nav-item d-xl-none ps-3 pt-3 d-flex align-items-center">
+                    <a href="javascript:;" class="nav-link text-body p-0" id="iconNavbarSidenav">
+                    <div class="sidenav-toggler-inner">
+                        <i class="sidenav-toggler-line"></i>
+                        <i class="sidenav-toggler-line"></i>
+                        <i class="sidenav-toggler-line"></i>
+                    </div>
+                    </a>
+                </li>
+            </ul>
+            </div>
+        </div> 
+    </nav> 
+
+			{% block content %}{% endblock %}            
+    
+      
+      <footer class="footer py-4  ">
+          <div class="container-fluid">
+            <div class="row align-items-center justify-content-lg-between">
+              <div class="col-lg-6 mb-lg-0 mb-4">
+                <div class="copyright text-center text-sm text-muted text-lg-start">
+                  {% comment %} © <script>
+                    document.write(new Date().getFullYear())
+                  </script>, {% endcomment %}
+                  {% comment %} made with <i class="fa fa-heart"></i>  by
+                  <a href="https://www.globalmediasd.com" class="font-weight-bold" target="_blank">Global Media</a> {% endcomment %}
+                </div>
+              </div>
+              
+            </div>
+          </div>
+        </footer>
+      </div>
+  </main>
+  
+  <!--   Core JS Files   -->
+  <script src="{% static "assets/js/core/popper.min.js" %}"></script>
+  <script src="{% static "assets/js/core/bootstrap.min.js" %}"></script>
+  <script src="{% static "assets/js/plugins/perfect-scrollbar.min.js" %}"></script>
+  <script src="{% static "assets/js/plugins/smooth-scrollbar.min.js" %}"></script>
+  <script>
+    var win = navigator.platform.indexOf('Win') > -1;
+    if (win && document.querySelector('#sidenav-scrollbar')) {
+      var options = {
+        damping: '0.5'
+      }
+      Scrollbar.init(document.querySelector('#sidenav-scrollbar'), options);
+    }
+  </script>
+  <!-- Github buttons -->
+  {% comment %} <script async defer src="https://buttons.github.io/buttons.js"></script> {% endcomment %}
+  <!-- Control Center for Material Dashboard: parallax effects, scripts for the example pages etc -->
+  <script src="{% static "assets/js/material-dashboard.min.js" %}"></script>
+<script>window.onload = function() {
+    const activeMenu = document.querySelector('.nav-link.active');
+    if (activeMenu) {
+        activeMenu.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+};
+</script> 
+<script>
+  // Automatically remove alerts after 3 seconds
+  setTimeout(() => {
+      const alerts = document.querySelectorAll('.alert');
+      alerts.forEach(alert => {
+          alert.style.opacity = '0';
+          setTimeout(() => alert.remove(), 500); // Remove after fade-out
+      });
+  }, 2200);
+</script></body>
+
+</html> 

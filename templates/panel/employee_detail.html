@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block content %}
+{% load humanize %}
+<div class="container py-4 mx-auto">
+  <div class="flex justify-center">
+    <div class="w-full max-w-2xl">
+      <div class="bg-white shadow rounded-lg">
+        <div class="bg-blue-500 rounded-t-lg px-6 py-4">
+          <h5 class="mb-0 text-white text-lg font-bold">تفاصيل المندوب: {{ employee.name }}</h5>
+        </div>
+        <div class="px-6 py-6">
+          <form method="get" class="mb-6 flex flex-wrap items-center gap-2">
+            <label class="me-2 font-semibold">الشهر:</label>
+            <select name="month" class="rounded border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-400" onchange="this.form.submit()">
+              {% for m in months %}
+                <option value="{{ m.value }}" {% if m.value == month %}selected{% endif %}>{{ m.label }}</option>
+              {% endfor %}
+            </select>
+            <label class="me-2 font-semibold">السنة:</label>
+            <input type="number" name="year" value="{{ year }}" class="rounded border-gray-300 px-3 py-2 w-28 focus:ring-2 focus:ring-blue-400" min="2000" max="2100" onchange="this.form.submit()">
+            <noscript><button type="submit" class="btn btn-primary btn-sm">عرض</button></noscript>
+          </form>
+          <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-gray-50 rounded p-4">
+              <div class="mb-2"><span class="font-semibold">مبيعات الشهر:</span> {{ total_sales|floatformat:2|intcomma }}</div>
+              <div class="mb-2"><span class="font-semibold">الهدف الشهري:</span> {{ sales_target|floatformat:2|intcomma }}</div>
+              <div class="mb-2"><span class="font-semibold">نسبة العمولة:</span> {{ commission_percentage|floatformat:2 }}%</div>
+              <div class="mb-2"><span class="font-semibold">قيمة العمولة:</span> {{ commission_amount|floatformat:2|intcomma }}</div>
+              <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}</div>
+            </div>
+            <div class="flex flex-col justify-center">
+              <div class="mb-2 font-semibold">نسبة تحقيق الهدف:</div>
+              <div class="w-full bg-gray-200 rounded h-8 relative overflow-hidden">
+                <div class="
+                  h-8 rounded transition-all duration-500
+                  {% if progress >= 100 %}
+                    bg-green-500
+                  {% elif progress >= 70 %}
+                    bg-blue-500
+                  {% elif progress >= 40 %}
+                    bg-yellow-400
+                  {% else %}
+                    bg-red-500
+                  {% endif %}
+                "
+                  style="width: {{ progress|floatformat:0 }}%;">
+                  <span class="absolute inset-0 flex items-center justify-center text-sm font-bold text-dark drop-shadow">
+                    {{ progress|floatformat:1 }}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mb-6">
+            <h6 class="font-bold mt-6 mb-2 text-gray-700">دفع عمولة:</h6>
+            <form method="post" action="{% url 'panel:commission_pay' employee.pk %}" class="flex flex-wrap gap-2 items-center">
+              {% csrf_token %}
+              <input type="number" name="amount" step="0.01" min="1" max="{{ unpaid_commission }}" class="form-control w-32" placeholder="المبلغ" required>
+              <input type="text" name="note" class="form-control w-64" placeholder="ملاحظة (اختياري)">
+              <button type="submit" class="btn btn-success">تسجيل دفعة عمولة</button>
+            </form>
+            <div class="mt-2 text-muted text-xs">يمكنك دفع جزء أو كل العمولة غير المدفوعة.</div>
+          </div>
+          <div class="mb-6">
+            <h6 class="font-bold mt-6 mb-2 text-gray-700">سجل دفعات العمولات:</h6>
+            <table class="min-w-full divide-y divide-gray-200 border">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-4 py-2 text-right font-bold">التاريخ</th>
+                  <th class="px-4 py-2 text-right font-bold">المبلغ</th>
+                  <th class="px-4 py-2 text-right font-bold">ملاحظة</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                {% for payment in commission_payments %}
+                <tr>
+                  <td class="px-4 py-2">{{ payment.paid_at|date:"Y-m-d H:i" }}</td>
+                  <td class="px-4 py-2">{{ payment.amount|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">{{ payment.note }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="3" class="text-center text-muted py-4">لا توجد دفعات عمولة مسجلة.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <h6 class="font-bold mt-6 mb-2 text-gray-700">المبيعات لهذا الشهر:</h6>
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 border">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-4 py-2 text-right font-bold">رقم البيع</th>
+                  <th class="px-4 py-2 text-right font-bold">التاريخ</th>
+                  <th class="px-4 py-2 text-right font-bold">القيمة</th>
+                  <th class="px-4 py-2 text-right font-bold">عمولة</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                {% for row in sales_with_commission %}
+                <tr>
+                  <td class="px-4 py-2">{{ row.sale.pk }}</td>
+                  <td class="px-4 py-2">{{ row.sale.created_at|date:"Y-m-d" }}</td>
+                  <td class="px-4 py-2">{{ row.sale.total|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">{{ row.commission|floatformat:2|intcomma }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted py-4">لا توجد مبيعات لهذا الشهر.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-6">
+            <a href="{% url 'panel:employee_list' %}" class="inline-block bg-info text-white px-4 py-2 rounded">رجوع</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

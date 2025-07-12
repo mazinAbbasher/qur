@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+{% load static %}
+{%load humanize%}
+{% block content %}
+<div class="dashboard-bg py-5" dir="rtl">
+    <div class="container">
+        <h2 class="mb-5 text-center fw-bold dashboard-title">
+            <i class="bi bi-graph-up-arrow me-2 text-primary"></i>
+            لوحة صافي الأرباح
+        </h2>
+        <form method="get" class="row g-3 align-items-end mb-5 glass-card p-4 shadow-lg">
+            <div class="col-md-2">
+                <label for="start_date" class="form-label">تاريخ البداية</label>
+                <input type="date" class="form-control" name="start_date" id="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-md-2">
+                <label for="end_date" class="form-label">تاريخ النهاية</label>
+                <input type="date" class="form-control" name="end_date" id="end_date" value="{{ end_date }}">
+            </div>
+            {% comment %} <div class="col-md-3">
+                <label for="area" class="form-label">المنطقة</label>
+                <select class="form-select" name="area" id="area">
+                    <option value="">كل المناطق</option>
+                    {% for area in areas %}
+                        <option value="{{ area.id }}" {% if area.id == selected_area %}selected{% endif %}>{{ area.name }}</option>
+                    {% endfor %}
+                </select>
+            </div> {% endcomment %}
+            {% comment %} <div class="col-md-3">
+                <label for="shipment" class="form-label">الشحنة</label>
+                <select class="form-select" name="shipment" id="shipment">
+                    <option value="">كل الشحنات</option>
+                    {% for shipment in all_shipments %}
+                        <option value="{{ shipment.id }}" {% if shipment.id == selected_shipment %}selected{% endif %}>
+                            {{ shipment.product.name }} ({{ shipment.received_at|date:"Y-m-d" }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div> {% endcomment %}
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-gradient w-100 fw-bold py-2">
+                    <i class="bi bi-funnel"></i> تصفية
+                </button>
+            </div>
+        </form>
+
+        <div class="row mb-5 g-4">
+            <div class="col-6 col-md-3">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        {% comment %} <div class="metric-icon bg-gradient-success me-3">
+                            <i class="bi bi-cash-stack"></i>
+                        </div> {% endcomment %}
+                        <div>
+                            <div class="metric-label">إجمالي المبيعات</div>
+                            <div class="metric-value">{{ total_sales|floatformat:0|intcomma }} <span class="metric-unit">جنيه</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        {% comment %} <div class="metric-icon bg-gradient-info me-3">
+                            <i class="bi bi-box-seam"></i>
+                        </div> {% endcomment %}
+                        <div>
+                            <div class="metric-label">إجمالي المشتريات</div>
+                            <div class="metric-value">{{ total_purchases|floatformat:0|intcomma }} <span class="metric-unit">جنيه</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        {% comment %} <div class="metric-icon bg-gradient-warning me-3">
+                            <i class="bi bi-receipt"></i>
+                        </div> {% endcomment %}
+                        <div>
+                            <div class="metric-label">المصروفات</div>
+                            <div class="metric-value">{{ total_expenses|floatformat:0|intcomma }} <span class="metric-unit">جنيه</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        {% comment %} <div class="metric-icon bg-gradient-secondary me-3">
+                            <i class="bi bi-percent"></i>
+                        </div> {% endcomment %}
+                        <div>
+                            <div class="metric-label">العمولات</div>
+                            <div class="metric-value">{{ total_commissions|floatformat:0|intcomma }} <span class="metric-unit">جنيه</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-md-2">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        <div>
+                            <div class="metric-label">قيمة المخزون الحالي</div>
+                            <div class="metric-value text-info">
+                                {{ inventory_value|floatformat:0|intcomma }}
+                                <span class="metric-unit">جنيه</span>
+                                {% comment %} <i class="bi bi-box2-heart text-info" title="قيمة المخزون"></i> {% endcomment %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-2">
+                <div class="glass-card metric-card shadow-sm h-100 border-0">
+                    <div class="card-body d-flex align-items-center">
+                        {% comment %} <div class="metric-icon bg-gradient-primary me-3">
+                            <i class="bi bi-graph-up-arrow"></i>
+                        </div> {% endcomment %}
+                        <div>
+                            <div class="metric-label">صافي الربح</div>
+                            <div class="metric-value {% if net_profit < 0 %}text-danger{% else %}text-success{% endif %}">
+                                {{ net_profit|floatformat:0|intcomma }}
+                                <span class="metric-unit">جنيه</span>
+                                {% comment %} {% if net_profit > 0 %}
+                                    <i class="bi bi-arrow-up-right-circle-fill text-success" title="ربح"></i>
+                                {% elif net_profit < 0 %}
+                                    <i class="bi bi-arrow-down-right-circle-fill text-danger" title="خسارة"></i>
+                                {% else %}
+                                    <i class="bi bi-dash-circle text-secondary" title="تعادل"></i>
+                                {% endif %} {% endcomment %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="glass-card shadow-lg border-0 mb-5">
+            <div class="card-header bg-transparent border-0 d-flex align-items-center pb-0">
+                <i class="bi bi-list-columns-reverse me-2 fs-5 text-primary"></i>
+                <span class="fw-bold fs-5">تفاصيل صافي الأرباح</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover table-borderless mb-0 align-middle dashboard-table">
+                    <thead>
+                        <tr>
+                            <th>المؤشر</th>
+                            <th>القيمة (جنيه)</th>
+                            <th class="d-none d-md-table-cell">الوصف</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <i class="bi bi-cash-stack text-success"></i> إجمالي المبيعات
+                            </td>
+                            <td>{{ total_sales|floatformat:0|intcomma }}</td>
+                            <td class="d-none d-md-table-cell">مجموع كل المبيعات في الفترة المحددة.</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <i class="bi bi-box-seam text-info"></i> إجمالي المشتريات
+                            </td>
+                            <td>{{ total_purchases|floatformat:0|intcomma }}</td>
+                            <td class="d-none d-md-table-cell">إجمالي تكلفة البضائع المشتراة (الشحنات).</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <i class="bi bi-receipt text-warning"></i> إجمالي المصروفات
+                            </td>
+                            <td>{{ total_expenses|floatformat:0|intcomma }}</td>
+                            <td class="d-none d-md-table-cell">كل مصروفات العمل.</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <i class="bi bi-percent text-secondary"></i> إجمالي العمولات
+                            </td>
+                            <td>{{ total_commissions|floatformat:0|intcomma }}</td>
+                            <td class="d-none d-md-table-cell">العمولات المدفوعة للموظفين.</td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <i class="bi bi-box2-heart text-info"></i> قيمة المخزون الحالي
+                            </td>
+                            <td>{{ inventory_value|floatformat:0|intcomma }}</td>
+                            <td class="d-none d-md-table-cell">قيمة كل المنتجات المتبقية في المخزون بسعر البيع الحالي.</td>
+                        </tr>
+                        <tr class="table-primary fw-bold">
+                            <td>
+                                <i class="bi bi-graph-up-arrow"></i> صافي الربح
+                            </td>
+                            <td>
+                                {{ net_profit|floatformat:0|intcomma }}
+                                {% if net_profit > 0 %}
+                                    <span class="badge bg-success ms-2">ربح</span>
+                                {% elif net_profit < 0 %}
+                                    <span class="badge bg-danger ms-2">خسارة</span>
+                                {% else %}
+                                    <span class="badge bg-secondary ms-2">تعادل</span>
+                                {% endif %}
+                            </td>
+                            <td class="d-none d-md-table-cell">إجمالي الربح بعد كل التكاليف والعمولات.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% comment %} <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css"> {% endcomment %}
+<style>
+    body {
+        background: #f6f8fa;
+    }
+    .dashboard-bg {
+        background: linear-gradient(120deg, #f8fafc 60%, #e3e9f7 100%);
+        min-height: 100vh;
+    }
+    .dashboard-title {
+        color: #2d2e32;
+        {% comment %} letter-spacing: 1.5px; {% endcomment %}
+        font-size: 2.4rem;
+        {% comment %} font-family: 'Segoe UI', 'Roboto', Arial, sans-serif; {% endcomment %}
+    }
+    .glass-card {
+        background: rgba(255,255,255,0.92);
+        border-radius: 1.7rem;
+        backdrop-filter: blur(12px) saturate(120%);
+        box-shadow: 0 8px 32px 0 rgba(31,38,135,0.13), 0 2px 8px rgba(102,126,234,0.08);
+        border: 1.5px solid rgba(180,180,255,0.18);
+        transition: box-shadow 0.22s, border 0.22s, background 0.22s;
+    }
+    .glass-card:hover {
+        box-shadow: 0 12px 36px 0 rgba(31,38,135,0.18), 0 4px 16px rgba(102,126,234,0.13);
+        border-color: rgba(102,126,234,0.22);
+        background: rgba(255,255,255,0.97);
+    }
+    .metric-card {
+        transition: transform 0.18s, box-shadow 0.18s;
+        min-height: 120px;
+        padding: 0.7rem 1.1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .metric-card .card-body {
+        width: 100%;
+        padding: 0.3rem 0.2rem;
+        display: flex;
+        align-items: center;
+        justify-content: flex-start;
+    }
+    .metric-card:hover {
+        transform: translateY(-7px) scale(1.035);
+        box-shadow: 0 1.2rem 2.8rem rgba(102,126,234,0.13);
+        background: rgba(255,255,255,0.98);
+    }
+    .metric-icon {
+        width: 54px;
+        height: 54px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2.1rem;
+        border-radius: 1.2rem;
+        color: #fff;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.09);
+    }
+    .bg-gradient-success {
+        background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+    }
+    {% comment %} .bg-gradient-info {
+        background: linear-gradient(135deg, #43c6ac 0%, #191654 100%);
+    } {% endcomment %}
+    .bg-gradient-warning {
+        background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
+    }
+    .bg-gradient-secondary {
+        background: linear-gradient(135deg, #868f96 0%, #596164 100%);
+    }
+    .bg-gradient-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .btn-gradient {
+        background: linear-gradient(90deg, #667eea 60%, #764ba2 100%);
+        color: #fff;
+        border: none;
+        transition: background 0.2s, box-shadow 0.2s;
+        box-shadow: 0 2px 8px rgba(102,126,234,0.10);
+    }
+    .btn-gradient:hover {
+        background: linear-gradient(90deg, #764ba2 60%, #667eea 100%);
+        color: #fff;
+        box-shadow: 0 4px 16px rgba(102,126,234,0.18);
+    }
+    .metric-label {
+        font-size: 1.08rem;
+        color: #7b7e8c;
+        font-weight: 500;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.2rem;
+    }
+    .metric-value {
+        font-size: 1.6rem;
+        font-weight: 700;
+        color: #2d2e32;
+        letter-spacing: 0.5px;
+        margin-top: 0.1rem;
+    }
+    .metric-unit {
+        font-size: 0.95rem;
+        color: #b0b3c2;
+        font-weight: 400;
+        margin-left: 2px;
+    }
+    .dashboard-table th, .dashboard-table td {
+        vertical-align: middle;
+        font-size: 1.07rem;
+    }
+    .dashboard-table thead th {
+        border-bottom: 2px solid #e3e9f7;
+        color: #5a5e6b;
+        font-weight: 600;
+        background: transparent;
+    }
+    .dashboard-table tbody tr {
+        transition: background 0.12s;
+    }
+    .dashboard-table tbody tr:hover {
+        background: #f5f7fa;
+    }
+    .table-primary {
+        background: linear-gradient(90deg, #e0e7ff 0%, #f8fafc 100%) !important;
+    }
+    @media (max-width: 767px) {
+        .metric-card {
+            margin-bottom: 1.2rem;
+        }
+        .dashboard-title {
+            font-size: 1.5rem;
+        }
+    }
+</style>
+{% endblock %}

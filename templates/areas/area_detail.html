@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4>تفاصيل المنطقة: {{ area.name }}</h4>
+    </div>
+    <div class="col-md-4 text-end">
+      <a href="{% url 'areas:area_list' %}" class="btn btn-secondary">رجوع</a>
+    </div>
+  </div>
+  <div class="card shadow mb-4">
+    <div class="card-body">
+      <h5>العملاء في هذه المنطقة</h5>
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>البريد الإلكتروني</th>
+            <th>إجمالي المبيعات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for client in clients %}
+          <tr>
+            <td>{{ client.name }}</td>
+            <td>{{ client.phone }}</td>
+            <td>{{ client.email|default:"-" }}</td>
+            <td>{{ client.total_sales|default:"0" }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="4" class="text-center text-muted">لا يوجد عملاء في هذه المنطقة.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card shadow">
+    <div class="card-body">
+      <h5>إجمالي مبيعات المنطقة</h5>
+      <p class="fs-5">{{ area.total_sales|default:"0" }}</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

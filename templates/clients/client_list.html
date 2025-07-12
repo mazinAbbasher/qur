@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4>العملاء</h4>
+    </div>
+    <div class="col-md-4 text-end">
+      <a href="{% url 'clients:client_add' %}" class="btn btn-success">إضافة عميل</a>
+    </div>
+  </div>
+  <form method="get" class="mb-3">
+    <div class="row">
+      <div class="col-md-4">
+        <select name="area" class="form-select" onchange="this.form.submit()">
+          <option value="">كل المناطق</option>
+          {% for area in areas %}
+            <option value="{{ area.id }}" {% if selected_area == area.id %}selected{% endif %}>{{ area.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </form>
+  <div class="card shadow">
+    <div class="card-body">
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>البريد الإلكتروني</th>
+            <th>المنطقة</th>
+            <th>إجمالي المبيعات</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for client in clients %}
+          <tr>
+            <td>{{ client.name }}</td>
+            <td>{{ client.phone }}</td>
+            <td>{{ client.email|default:"-" }}</td>
+            <td>{{ client.area }}</td>
+            <td>{{ client.total_sales|default:"0" }}</td>
+            <td>
+              <a href="{% url 'clients:client_edit' client.pk %}" class="btn btn-primary btn-sm">تعديل</a>
+              <a href="{% url 'clients:client_delete' client.pk %}" class="btn btn-danger btn-sm" onclick="return confirm('هل أنت متأكد من حذف العميل؟');">حذف</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-muted">لا يوجد عملاء.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

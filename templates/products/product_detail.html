@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row">
+    <div class="col-md-10 mx-auto">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">تفاصيل المنتج: {{ product.name }}</h5>
+        </div>
+        <div class="card-body">
+          <dl class="row">
+            <dt class="col-sm-3">الوحدة</dt>
+            <dd class="col-sm-9">{{ product.unit }}</dd>
+            <dt class="col-sm-3">سعر الصرف</dt>
+            <dd class="col-sm-9">{{ product.exchange_rate }}</dd>
+            <dt class="col-sm-3">الوصف</dt>
+            <dd class="col-sm-9">{{ product.description }}</dd>
+            <dt class="col-sm-3">المخزون الحالي</dt>
+            <dd class="col-sm-9">{{ current_stock|intcomma }}</dd>
+          </dl>
+          <hr>
+          <h6>العملاء المرتبطون:</h6>
+          <ul>
+            {% for customer in customers %}
+              <li>{{ customer.name }}</li>
+            {% empty %}
+              <li>لا يوجد عملاء.</li>
+            {% endfor %}
+          </ul>
+          <hr>
+          <h6>تاريخ الشراء (الوارد):</h6>
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>الكمية</th>
+                <th>تكلفة الوحدة (دولار)</th>
+                <th>تكلفة الوحدة (جنيه)</th>
+                <th>رقم التشغيلة</th>
+                <th>تاريخ الانتهاء</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for s in shipments %}
+              <tr>
+                <td>{{ s.received_at|date:"Y-m-d" }}</td>
+                <td>{{ s.quantity }}</td>
+                <td>{{ s.cost_usd }}</td>
+                <td>{{ s.cost_sdg }}</td>
+                <td>{{ s.batch_number }}</td>
+                <td>{{ s.expiry_date|date:"Y-m-d" }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6" class="text-center text-muted">لا يوجد سجل شراء.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <hr>
+          <h6>تاريخ البيع (الصادر):</h6>
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>التاريخ</th>
+                <th>الكمية</th>
+                <th>السعر</th>
+                <th>العميل</th>
+                <th>رقم التشغيلة</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for si in sale_items %}
+              <tr>
+                <td>{{ si.sale.created_at|date:"Y-m-d" }}</td>
+                <td>{{ si.quantity }}</td>
+                <td>{{ si.price }}</td>
+                <td>{{ si.sale.client.name }}</td>
+                <td>{{ si.inventory.shipment.batch_number }}</td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="5" class="text-center text-muted">لا يوجد سجل بيع.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <hr>
+          <h6>الأسعار عبر الزمن:</h6>
+          <div class="row">
+            <div class="col-md-6">
+              <strong>أسعار الشراء:</strong>
+              <ul>
+                {% for p in purchase_prices %}
+                  <li>{{ p.date|date:"Y-m-d" }}: {{ p.cost_usd }}$ ({{ p.cost_sdg }} SDG) [تشغيلة {{ p.batch }}]</li>
+                {% empty %}
+                  <li>لا يوجد.</li>
+                {% endfor %}
+              </ul>
+            </div>
+            <div class="col-md-6">
+              <strong>أسعار البيع:</strong>
+              <ul>
+                {% for s in sale_prices %}
+                  <li>{{ s.date|date:"Y-m-d" }}: {{ s.price }} SDG ({{ s.quantity }} وحدة) للعميل {{ s.client }} [تشغيلة {{ s.batch }}]</li>
+                {% empty %}
+                  <li>لا يوجد.</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+          <hr>
+          <h6>حركة المخزون (الخط الزمني):</h6>
+          <ul>
+            {% for event in timeline %}
+              <li>
+                {% if event.type == 'in' %}
+                  <span class="badge bg-success">وارد</span>
+                {% else %}
+                  <span class="badge bg-danger">صادر</span>
+                {% endif %}
+                {{ event.date|date:"Y-m-d H:i" }}: {{ event.note }}
+              </li>
+            {% empty %}
+              <li>لا يوجد حركة مخزون.</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

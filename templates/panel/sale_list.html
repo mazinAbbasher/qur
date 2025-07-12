@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4 mx-auto">
+  <div class="row justify-content-center">
+    <div class="col-md-12">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">قائمة المبيعات</h5>
+          <a href="{% url 'panel:sale_create' %}" class="btn btn-success">
+            <i class="bi bi-plus-circle"></i> فاتورة جديدة
+          </a>
+        </div>
+        <div class="card-body">
+          <!-- Search form for invoice number -->
+          <form method="get" class="mb-3 d-flex align-items-center" style="max-width: 350px;">
+            <input type="text" name="invoice_number" class="form-control me-2" placeholder="بحث برقم الفاتورة" value="{{ invoice_number|default_if_none:'' }}">
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-primary">بحث</button>
+            </div>          </form>
+          <div class="table-responsive">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-4 py-2 text-right font-bold">رقم الفاتورة</th>
+                  <th class="px-4 py-2 text-right font-bold">العميل</th>
+                  <th class="px-4 py-2 text-right font-bold">المندوب</th>
+                  <th class="px-4 py-2 text-right font-bold">التاريخ</th>
+                  <th class="px-4 py-2 text-right font-bold">الإجمالي</th>
+                  <th class="px-4 py-2 text-right font-bold">المدفوع</th>
+                  <th class="px-4 py-2 text-right font-bold">المتبقي</th>
+                  <th class="px-4 py-2 text-right font-bold">الحالة</th>
+                  <th class="px-4 py-2 text-right font-bold">تفاصيل</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                {% for sale in sales %}
+                <tr>
+                  <td class="px-4 py-2">{{ sale.invoice.number }}</td>
+                  <td class="px-4 py-2">
+                    {% if sale.client %}
+                      <span class="fw-bold">{{ sale.client.name }}</span>
+                      {% if sale.client.phone %}
+                        <span class="text-muted small">({{ sale.client.phone }})</span>
+                      {% endif %}
+                    {% else %}
+                      <span class="text-muted">-</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-2">
+                    {% if sale.employee %}
+                      {{ sale.employee.name }}
+                    {% else %}
+                      <span class="text-muted">-</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-2">{{ sale.created_at|date:"Y-m-d H:i" }}</td>
+                  <td class="px-4 py-2"><span class="text-success fw-bold">{{ sale.total|floatformat:2|intcomma }}</span></td>
+                  {% with invoice=sale.invoice %}
+                  <td class="px-4 py-2">
+                    {% if invoice %}
+                      <span class="text-success fw-bold">{{ invoice.paid_amount|floatformat:2|intcomma }}</span>
+                    {% else %}
+                      <span class="text-muted">-</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-2">
+                    {% if invoice %}
+                      <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success fw-bold{% endif %}">
+                        {{ invoice.remaining_amount|floatformat:2|intcomma }}
+                      </span>
+                    {% else %}
+                      <span class="text-muted">-</span>
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-2">
+                    {% if invoice %}
+                      <span class="badge 
+                        {% if invoice.status == 'paid' %}bg-success
+                        {% elif invoice.status == 'partial' %}bg-warning text-dark
+                        {% else %}bg-danger{% endif %}">
+                        {% if invoice.status == 'paid' %}مدفوعة
+                        {% elif invoice.status == 'partial' %}مدفوعة جزئياً
+                        {% else %}غير مدفوعة{% endif %}
+                      </span>
+                    {% else %}
+                      <span class="badge bg-secondary">-</span>
+                    {% endif %}
+                  </td>
+                  {% endwith %}
+                  <td class="px-4 py-2">
+                    <a href="{% url 'panel:sale_detail' sale.pk %}" class="inline-flex items-center px-3 py-1 rounded bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200 transition text-xs font-semibold">
+                      <i class="bi bi-eye"></i> عرض
+                    </a>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="9" class="text-center text-muted py-4">لا توجد مبيعات.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

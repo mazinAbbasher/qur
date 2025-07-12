@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<style>
+@media print {
+  @page {
+    size: 70mm auto;
+    margin: 0;
+  }
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    direction: rtl;
+    background: #fff !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .printable-invoice, .printable-invoice * {
+    visibility: visible !important;
+  }
+  .printable-invoice {
+    width: 70mm;
+    max-width: 100vw;
+    font-family: "Tajawal", "Cairo", "Arial", sans-serif !important;
+    font-size: 15px;
+    background: #fff;
+    color: #000;
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform: translateX(-50%);
+    padding: 0;
+    margin: 0;
+    line-height: 1.5;
+    box-sizing: border-box;
+  }
+  .printable-invoice .d-print-none {
+    display: none !important;
+  }
+  .printable-invoice .invoice-header,
+  .printable-invoice .invoice-subheader,
+  .printable-invoice .thankyou,
+  .printable-invoice .receipt-copy,
+  .printable-invoice .invoice-info {
+    text-align: center;
+  }
+  .invoice-header {
+    font-size: 20px;
+    font-weight: bold;
+    margin: 4px 0;
+  }
+  .invoice-subheader {
+    font-size: 14px;
+    color: #444;
+    margin-bottom: 6px;
+  }
+  .invoice-info {
+    font-size: 13px;
+    margin: 3px 0;
+  }
+  .separator {
+    border-top: 1px dashed #999;
+    margin: 6px 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    margin-top: 4px;
+    table-layout: fixed;
+    word-break: break-word;
+  }
+  th, td {
+    padding: 4px 0;
+    border-bottom: 1px dashed #ccc;
+    text-align: right;
+    word-break: break-word;
+  }
+  th {
+    font-weight: bold;
+    font-size: 15px;
+    border-top: 1px solid #666;
+    border-bottom: 2px solid #666;
+  }
+  td:first-child, th:first-child {
+    text-align: right;
+  }
+  .vat-row {
+    font-weight: bold;
+    color: #333;
+  }
+  .total-row {
+    font-weight: bold;
+    font-size: 16px;
+    border-top: 2px solid #000;
+  }
+  .thankyou {
+    font-size: 14px;
+    font-weight: bold;
+    margin-top: 8px;
+  }
+  .qr-code {
+    text-align: center;
+    margin-top: 4px;
+  }
+  .notes, .cashier {
+    font-size: 12px;
+    margin-top: 2px;
+    color: #555;
+    text-align: right;
+  }
+}
+</style>
+
+<script>
+window.addEventListener('DOMContentLoaded', function () {
+  if (!window.matchMedia('print').matches) {
+    setTimeout(() => window.print(), 400);
+  }
+});
+</script>
+
+<div class="container py-4">
+  <div class="row justify-content-center align-items-center">
+    <div class="col-md-8">
+      <div class="card shadow printable-invoice">
+
+        {% comment %} <div class="receipt-copy">نسخة العميل</div> {% endcomment %}
+
+        <div class="invoice-header">Equatorial</div>
+        {% comment %} <div class="invoice-subheader">شارع الجامعة، المدينة<br>0100-123-4567</div> {% endcomment %}
+
+        <div class="separator"></div>
+
+        <div class="invoice-info">فاتورة الطلب {{ order.public_id }}</div>
+        <div class="invoice-info">التاريخ: {{ invoice.created_at|date:"Y-m-d" }} - الساعة: {{ invoice.created_at|date:"H:i" }}</div>
+        <div class="invoice-info">نوع الطلب: {{ order.get_order_type_display }}</div>
+
+        {% if order.user %}
+        <div class="cashier">الكاشير: {{ order.user.get_full_name|default:order.user.username }}</div>
+        {% endif %}
+
+        {% if order.notes %}
+        <div class="notes">ملاحظات: {{ order.notes }}</div>
+        {% endif %}
+
+        <div class="separator"></div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>المنتج</th>
+              <th>الكمية</th>
+              <th>السعر</th>
+              <th>الإجمالي</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in order.items.all %}
+            <tr>
+              <td>{{ item.product.name }}</td>
+              <td>{{ item.quantity }}</td>
+              <td>{{ item.product.price|floatformat:"0"|intcomma }}</td>
+              <td>{{ item.get_total|floatformat:"0"|intcomma }}</td>
+            </tr>
+            {% endfor %}
+
+            {% if order.vat %}
+            <tr class="vat-row">
+              <td colspan="3" style="text-align:left;">ضريبة القيمة المضافة</td>
+              <td>{{ order.vat|floatformat:"0"|intcomma }}</td>
+            </tr>
+            {% endif %}
+
+            <tr class="total-row">
+              <td colspan="3" style="text-align:right;">الإجمالي الكلي</td>
+              <td>{{ order.total|floatformat:"0"|intcomma }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="separator"></div>
+
+        {% comment %} <div class="qr-code">
+          <img src="{% if order.qr_url %}{{ order.qr_url }}{% else %}https://api.qrserver.com/v1/create-qr-code/?size=80x80&data={{ request.build_absolute_uri }}{% endif %}" width="80" height="80" alt="QR">
+        </div> {% endcomment %}
+
+        <div class="thankyou">شكراً لزيارتكم!</div>
+
+        <div class="d-print-none mt-3">
+          <a href="{% url 'panel:order_list' %}" class="btn btn-secondary">رجوع</a>
+          <button onclick="window.print()" class="btn btn-primary ms-2">طباعة الفاتورة</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

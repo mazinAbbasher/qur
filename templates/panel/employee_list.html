@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+{% load humanize %}
+<div class="container py-4 mx-auto">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">قائمة المناديب</h5>
+          <a href="{% url 'panel:employee_add' %}" class="btn btn-success">إضافة مندوب</a>
+        </div>
+        <div class="card-body">
+          <!-- Month/Year Filter -->
+          <form method="get" class="mb-6 flex flex-wrap items-center gap-2">
+            <label class="me-2 font-semibold">الشهر:</label>
+            <select name="month" class="rounded border-gray-300 px-3 py-2 focus:ring-2 focus:ring-blue-400" onchange="this.form.submit()">
+              {% for m in months %}
+                <option value="{{ m.value }}" {% if m.value == selected_month %}selected{% endif %}>{{ m.label }}</option>
+              {% endfor %}
+            </select>
+            <label class="me-2 font-semibold">السنة:</label>
+            <input type="number" name="year" value="{{ selected_year }}" class="rounded border-gray-300 px-3 py-2 w-28 focus:ring-2 focus:ring-blue-400" min="2000" max="2100" onchange="this.form.submit()">
+            <noscript><button type="submit" class="btn btn-primary btn-sm">عرض</button></noscript>
+          </form>
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <div class="table-responsive">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-4 py-2 text-right font-bold">الاسم</th>
+                  <th class="px-4 py-2 text-right font-bold">مبيعات الشهر</th>
+                  <th class="px-4 py-2 text-right font-bold">الهدف الشهري</th>
+                  <th class="px-4 py-2 text-right font-bold">نسبة العمولة</th>
+                  <th class="px-4 py-2 text-right font-bold">قيمة العمولة</th>
+                  <th class="px-4 py-2 text-right font-bold">العمولة غير المدفوعة</th>
+                  <th class="px-4 py-2 text-right font-bold" style="min-width:160px;">التقدم نحو الهدف</th>
+                  <th class="px-4 py-2 text-right font-bold">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                {% for row in employee_data %}
+                <tr>
+                  <td class="px-4 py-2">{{ row.employee.name }}</td>
+                  <td class="px-4 py-2">{{ row.monthly_sales|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">{{ row.sales_target|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">{{ row.commission_percentage|floatformat:2 }}%</td>
+                  <td class="px-4 py-2">{{ row.commission_amount|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2 text-danger font-bold">{{ row.unpaid_commission|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">
+                    <div class="relative w-full bg-gray-200 rounded h-6 overflow-hidden shadow-inner">
+                      <div class="
+                        h-6 rounded transition-all duration-500
+                        {% if row.progress >= 100 %}
+                          bg-green-400
+                        {% elif row.progress >= 70 %}
+                          bg-blue-400
+                        {% elif row.progress >= 40 %}
+                          bg-yellow-300
+                        {% else %}
+                          bg-red-400
+                        {% endif %}
+                      "
+                        style="width: {{ row.progress|floatformat:0 }}%;">
+                      </div>
+                      <span class="absolute inset-0 flex items-center justify-center text-xs font-bold text-black">
+                        {{ row.progress|floatformat:1 }}%
+                      </span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-2">
+                    <div class="flex flex-row gap-2 justify-center">
+                      <a href="{% url 'panel:employee_detail' row.employee.pk %}?month={{ selected_month }}&year={{ selected_year }}"
+                         class="inline-flex items-center px-3 py-1 rounded bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200 transition text-xs font-semibold"
+                         title="عرض التفاصيل">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                        عرض
+                      </a>
+                      <a href="{% url 'panel:employee_edit' row.employee.pk %}"
+                         class="inline-flex items-center px-3 py-1 rounded bg-yellow-100 text-yellow-800 border border-yellow-300 hover:bg-yellow-200 transition text-xs font-semibold"
+                         title="تعديل">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15.232 5.232l3.536 3.536M9 13l6-6m2 2l-6 6m-2 2h6"/></svg>
+                        تعديل
+                      </a>
+                      {% comment %} <a href="{% url 'panel:employee_delete' row.employee.pk %}"
+                         class="inline-flex items-center px-3 py-1 rounded bg-red-100 text-red-800 border border-red-300 hover:bg-red-200 transition text-xs font-semibold"
+                         onclick="return confirm('هل أنت متأكد من حذف المندوب؟');"
+                         title="حذف">
+                        <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12"/></svg>
+                        حذف
+                      </a> {% endcomment %}
+                    </div>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted py-4">لا توجد بيانات.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

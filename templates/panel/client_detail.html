@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">تفاصيل العميل: {{ client.name }}</h5>
+        </div>
+        <div class="card-body">
+          <h6>المعاملات المالية</h6>
+          <div class="table-responsive">
+            <table class="table table-bordered align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>التاريخ</th>
+                  <th>النوع</th>
+                  <th>رقم الفاتورة</th>
+                  <th>المبلغ</th>
+                  <th>الدفعة</th>
+                  <th>الرصيد بعد العملية</th>
+                  <th>ملاحظة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for event in timeline %}
+                <tr>
+                  <td>{{ event.date|date:"Y-m-d H:i" }}</td>
+                  <td>
+                    {% if event.type == 'invoice' %}
+                      <span class="badge bg-primary">فاتورة</span>
+                    {% else %}
+                      <span class="badge bg-success">دفعة</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if event.invoice %}
+                      {{ event.invoice.number|default:event.invoice.pk }}
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if event.type == 'invoice' %}
+                      {{ event.amount|floatformat:2|intcomma }}
+                    {% endif %}
+                  </td>
+                  <td>
+                    {% if event.type == 'payment' %}
+                      {{ event.paid|floatformat:2|intcomma }}
+                    {% endif %}
+                  </td>
+                  <td>
+                    {{ event.balance|floatformat:2|intcomma }}
+                  </td>
+                  <td>{{ event.note }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="7" class="text-center text-muted">لا توجد معاملات.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-4">
+            <h6>إجمالي المبالغ غير المدفوعة: <span class="text-danger">{{ total_unpaid|floatformat:2|intcomma }}</span></h6>
+          </div>
+          <div class="mt-3">
+            <a href="{% url 'panel:client_list' %}" class="btn btn-secondary">رجوع</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

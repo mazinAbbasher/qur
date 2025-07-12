@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4>أرباح الشحنات</h4>
+    </div>
+  </div>
+  <div class="card shadow">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-striped align-middle text-center">
+          <thead class="table-light">
+            <tr>
+              {% comment %} <th>الشحنة</th> {% endcomment %}
+              <th>المنتج</th>
+              <th>رقم التشغيلة</th>
+              {% comment %} <th>تاريخ الانتهاء</th> {% endcomment %}
+              <th>الكمية</th>
+              <th>تكاليف اضافيه</th>
+              <th>تكلفة الشراء</th>
+              <th>إجمالي المبيعات</th>
+              <th>العمولة</th>
+              <th>قيمة المخزون الحالي</th> <!-- New column -->
+              <th>الربح</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for data in shipment_data %}
+            
+            <tr>
+              {% comment %} <td>{{ data.shipment.pk }}</td> {% endcomment %}
+              <td>{{ data.shipment.product.name }}</td>
+              <td>{{ data.batch_number|default:"-" }}</td>
+              {% comment %} <td>{{ data.expiry_date|date:"Y-m-d"|default:"-" }}</td> {% endcomment %}
+              <td>{{ data.shipment.quantity }}</td>
+              <td>{{ data.shipment.shipment_cost|floatformat:"2"|intcomma }}</td>
+              <td>{{ data.purchase_cost|floatformat:"2"|intcomma }}</td>
+              <td>{{ data.total_revenue|floatformat:"2"|intcomma }}</td>
+              <td>{{ data.commission_amount|floatformat:"2"|intcomma }}</td>
+              <td>{{ data.inventory_value|floatformat:"2"|intcomma }}</td> <!-- New cell -->
+              <td>
+                {% if data.profit >= 0 %}
+                  <span class="badge bg-success">{{ data.profit|floatformat:"2"|intcomma }}</span>
+                {% else %}
+                  <span class="badge bg-danger">{{ data.profit|floatformat:"2"|intcomma }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="10" class="text-center text-muted">لا توجد شحنات.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

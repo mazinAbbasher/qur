@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="card mb-4">
+    <div class="card-header bg-gradient-danger text-white">
+      <h5 class="mb-0 text-white">الديون المستحقة على العملاء</h5>
+    </div>
+    <div class="card-body p-0">
+      {% if client_debts %}
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>العميل</th>
+            <th>إجمالي الدين</th>
+            <th>المتأخر (Overdue)</th>
+            {% comment %} <th>عدد الفواتير</th> {% endcomment %}
+            {% comment %} <th>تفاصيل</th> {% endcomment %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for entry in client_debts %}
+          <tr>
+            <td>
+              <a href="{% url 'panel:client_detail' entry.client.pk %}">
+                {{ entry.client.name }}
+              </a>
+            </td>
+            <td class="text-danger fw-bold">{{ entry.total_debt|floatformat:2|intcomma }} جنيه</td>
+            <td>
+              {% if entry.overdue_debt > 0 %}
+                <span class="text-danger fw-bold">{{ entry.overdue_debt|floatformat:2|intcomma }} جنيه</span>
+              {% else %}
+                <span class="text-success">0</span>
+              {% endif %}
+            </td>
+            {% comment %} <td>{{ entry.invoices|length }}</td> {% endcomment %}
+            {% comment %} <td>
+              <ul class="mb-0 small">
+                {% for inv in entry.invoices %}
+                  <li>
+                    فاتورة #{{ inv.number }}:
+                    <span class="text-danger">{{ inv.remaining_amount|floatformat:2|intcomma }} جنيه</span>
+                    {% if inv.due_date and inv.due_date < today %}
+                      <span class="badge bg-danger">متأخرة</span>
+                    {% elif inv.due_date %}
+                      <span class="badge bg-secondary">تستحق {{ inv.due_date }}</span>
+                    {% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            </td> {% endcomment %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <div class="p-4 text-center text-muted">لا يوجد عملاء لديهم ديون حالياً.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

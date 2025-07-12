@@ -1,0 +1,376 @@
+{% extends "base.html" %}
+{% load breadcrumbs %}
+{% block content %}
+
+{% show_breadcrumbs request.breadcrumbs %}
+{% if messages %}
+              <ul class="messages">
+                  {% for message in messages %}
+                  <li class="alert alert-{{ message.tags }}">{{message}}
+                  {% endfor %}
+              </ul>
+          {% endif %}
+<div class="container mt-4 mb-4">
+  <div class="card shadow border-0 rounded-4">
+      <div class="card-header bg-gradient bg-info text-center py-4 rounded-top-4" style="background: linear-gradient(90deg, #17a2b8 0%, #138496 100%);">
+          <h3 class="mb-0 text-white fw-bold letter-spacing-1"><i class="fas fa-home-user me-2"></i>تفاصيل الموعد المنزلي</h3>
+      </div>
+      <div class="card-body p-4 p-md-5 bg-light rounded-bottom-4">
+          <!-- Appointment & User Info -->
+          <div class="row mb-4 g-4">
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-user me-1"></i> اسم العميل</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.first_name }} {{ appointment.last_name }}</div>
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-phone me-1"></i> رقم الهاتف</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.phone }}</div>
+                  </div>
+              </div>
+          </div>
+          <div class="row mb-4 g-4">
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-calendar-alt me-1"></i> تاريخ الموعد</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.date|date:"d/m/Y" }}</div>
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-clock me-1"></i> الفترة</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.get_period_display }}</div>
+                  </div>
+              </div>
+          </div>
+          <div class="row mb-4 g-4">
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-home me-1"></i> الخدمة</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.service.name }}</div>
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-users me-1"></i> عدد العاملات</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.workers_count }}</div>
+                  </div>
+              </div>
+          </div>
+          <div class="row mb-4 g-4">
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-hourglass-half me-1"></i> عدد الساعات</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.hours_count }}</div>
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-calendar-week me-1"></i> عدد الزيارات في الأسبوع</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.visits_per_week }}</div>
+                  </div>
+              </div>
+          </div>
+          <div class="row mb-4 g-4">
+              <div class="col-md-12">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-map-marker-alt me-1"></i> العنوان</h6>
+                      <div class="fw-semibold fs-5">
+                          {% if appointment.latitude and appointment.longitude %}
+                              <a href="https://maps.google.com/?q={{ appointment.latitude }},{{ appointment.longitude }}" target="_blank" class="text-decoration-underline text-info">
+                                  {{ appointment.address }}
+                              </a>
+                          {% else %}
+                              <a href="https://maps.google.com/?q={{ appointment.address|urlencode }}" target="_blank" class="text-decoration-underline text-info">
+                                  {{ appointment.address }}
+                              </a>
+                          {% endif %}
+                          {% if appointment.floor %}، طابق: {{ appointment.floor }}{% endif %}
+                          {% if appointment.apartment %}، شقة: {{ appointment.apartment }}{% endif %}
+                      </div>
+                  </div>
+              </div>
+          </div>
+          <div class="row mb-4 g-4">
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-money-bill-wave me-1"></i> طريقة الدفع</h6>
+                      <div class="fw-semibold fs-5">{{ appointment.get_payment_method_display }}</div>
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="bg-white shadow-sm rounded-3 p-3 h-100">
+                      <h6 class="text-info mb-1"><i class="fas fa-dollar-sign me-1"></i> السعر الإجمالي</h6>
+                      <div class="fw-semibold fs-5 text-success">{{ appointment.total_price }} <span class="fs-6">جنيه</span></div>
+                  </div>
+              </div>
+          </div>
+          {% if appointment.house_image %}
+          <div class="mb-4">
+              <div class="bg-white shadow-sm rounded-3 p-3 text-center">
+                  <h6 class="text-info mb-2"><i class="fas fa-image me-1"></i> صورة المنزل أو معلم قريب</h6>
+                  <div class="h-app-img-wrapper">
+                    <img src="{{ appointment.house_image.url }}" alt="صورة المنزل" class="img-fluid rounded border shadow-sm h-app-img">
+                  </div>
+              </div>
+          </div>
+          {% endif %}
+          {% if appointment.weekdays %}
+          <div class="mb-4">
+              <div class="bg-white shadow-sm rounded-3 p-3">
+                  <h6 class="text-info mb-1"><i class="fas fa-calendar-day me-1"></i> أيام الزيارة</h6>
+                  <div class="fw-semibold fs-5" id="weekdays-ar"></div>
+                  <script>
+                    // Map English weekdays to Arabic
+                    const weekdaysMap = {
+                        'saturday': 'السبت',
+                        'sunday': 'الأحد',
+                        'monday': 'الاثنين',
+                        'tuesday': 'الثلاثاء',
+                        'wednesday': 'الأربعاء',
+                        'thursday': 'الخميس',
+                        'friday': 'الجمعة',
+                        // Also handle short names if needed
+                        'Sat': 'السبت',
+                        'Sun': 'الأحد',
+                        'Mon': 'الاثنين',
+                        'Tue': 'الثلاثاء',
+                        'Wed': 'الأربعاء',
+                        'Thu': 'الخميس',
+                        'Fri': 'الجمعة'
+                    };
+                    (function() {
+                        var raw = `{{ appointment.weekdays }}`;
+                        var days = raw.split(',').map(s => s.trim()).filter(Boolean);
+                        var ar = days.map(d => weekdaysMap[d] || d).join('، ');
+                        document.addEventListener('DOMContentLoaded', function() {
+                            document.getElementById('weekdays-ar').textContent = ar;
+                        });
+                    })();
+                  </script>
+              </div>
+          </div>
+          {% endif %}
+          {% if appointment.driver_arrival_time %}
+          <div class="mb-4">
+              <div class="bg-white shadow-sm rounded-3 p-3">
+                  <h6 class="text-info mb-1"><i class="fas fa-car me-1"></i> وقت وصول السائق</h6>
+                  <div class="fw-semibold fs-5">{{ appointment.driver_arrival_time|time:"H:i" }}</div>
+              </div>
+          </div>
+          {% endif %}
+          {% if appointment.additional_phone %}
+          <div class="mb-4">
+              <div class="bg-white shadow-sm rounded-3 p-3">
+                  <h6 class="text-info mb-1"><i class="fas fa-phone-alt me-1"></i> رقم إضافي</h6>
+                  <div class="fw-semibold fs-5">{{ appointment.additional_phone }}</div>
+              </div>
+          </div>
+          {% endif %}
+
+          <!-- Divider -->
+          <hr class="my-5 border-info-subtle">
+
+          <!-- Extra Services -->
+          {% if appointment.extra_services.all %}
+          <h4 class="text-center text-info mb-4 fw-bold"><i class="fas fa-plus me-1"></i> خدمات إضافية</h4>
+          <div class="table-responsive">
+              <table class="table table-bordered table-hover align-middle shadow-sm rounded-3 overflow-hidden">
+                  <thead class="bg-info text-white">
+                      <tr class="text-center">
+                          <th>الخدمة</th>
+                          <th>عدد العاملات</th>
+                          <th>عدد الساعات</th>
+                          <th>السعر الإجمالي</th>
+                      </tr>
+                  </thead>
+                  <tbody>
+                      {% for extra in appointment.extra_services.all %}
+                      <tr class="text-center text-dark">
+                          <td>{{ extra.service.name }}</td>
+                          <td>{{ extra.workers_count }}</td>
+                          <td>{{ extra.hours_count }}</td>
+                          <td class="text-success fw-bold">{{ extra.total_price }} جنيه</td>
+                      </tr>
+                      {% empty %}
+                      <tr>
+                          <td colspan="4" class="text-center text-muted">
+                              <i class="fas fa-exclamation-circle"></i> لا توجد خدمات إضافية.
+                          </td>
+                      </tr>
+                      {% endfor %}
+                  </tbody>
+              </table>
+          </div>
+          {% endif %}
+
+          <!-- Divider -->
+          <hr class="my-5 border-info-subtle">
+
+          <!-- Status -->
+          <div class="row mb-4">
+              <div class="col-md-12">
+                  <div class="bg-white shadow-sm rounded-3 p-4 text-center position-relative">
+                      <h6 class="text-info mb-3 fw-bold fs-5"><i class="fas fa-info-circle me-1"></i> حالة الموعد</h6>
+                      <span class="badge fs-5 px-4 py-2 mb-3 animated-badge
+                        {% if appointment.status == 'pending' %}bg-warning text-white
+                        {% elif appointment.status == 'confirmed' %}bg-info text-white
+                        {% elif appointment.status == 'completed' %}bg-success text-white
+                        {% elif appointment.status == 'cancelled' %}bg-danger text-white
+                        {% else %}bg-secondary{% endif %}">
+                        {{ appointment.get_status_display }}
+                      </span>
+                      <!-- Change Status Form -->
+                      <form method="post" action="{% url 'panel:change_appointment_status' appointment.id %}" class="d-flex flex-column align-items-center gap-2 mt-3" id="status-form">
+                        {% csrf_token %}
+                        <div class="dropdown w-100" style="max-width: 320px;">
+                          <button class="btn btn-outline-info dropdown-toggle w-100 text-start fw-semibold shadow-sm" type="button" id="statusDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-exchange-alt me-2"></i>
+                            <span id="selected-status-label">
+                              {% if appointment.status == 'pending' %}قيد الانتظار
+                              {% elif appointment.status == 'confirmed' %}مؤكد
+                              {% elif appointment.status == 'completed' %}مكتمل
+                              {% elif appointment.status == 'cancelled' %}ملغي
+                              {% else %}اختر الحالة{% endif %}
+                            </span>
+                          </button>
+                          <ul class="dropdown-menu w-100 shadow" aria-labelledby="statusDropdown">
+                            <li>
+                              <button class="dropdown-item d-flex align-items-center gap-2 status-option" type="button" data-value="pending">
+                                <span class="badge bg-warning rounded-circle" style="width:16px;height:16px;"></span> قيد الانتظار
+                              </button>
+                            </li>
+                            <li>
+                              <button class="dropdown-item d-flex align-items-center gap-2 status-option" type="button" data-value="confirmed">
+                                <span class="badge bg-info rounded-circle" style="width:16px;height:16px;"></span> مؤكد
+                              </button>
+                            </li>
+                            <li>
+                              <button class="dropdown-item d-flex align-items-center gap-2 status-option" type="button" data-value="completed">
+                                <span class="badge bg-success rounded-circle" style="width:16px;height:16px;"></span> مكتمل
+                              </button>
+                            </li>
+                            <li>
+                              <button class="dropdown-item d-flex align-items-center gap-2 status-option" type="button" data-value="cancelled">
+                                <span class="badge bg-danger rounded-circle" style="width:16px;height:16px;"></span> ملغي
+                              </button>
+                            </li>
+                          </ul>
+                          <input type="hidden" name="status" id="status-input" value="{{ appointment.status }}">
+                        </div>
+                        <button type="submit" class="btn btn-info text-white fw-bold px-4 py-2 shadow-sm position-relative" id="status-submit-btn" data-bs-toggle="tooltip" data-bs-placement="top" title="تحديث حالة الموعد">
+                          <span id="submit-btn-text"><i class="fas fa-sync-alt me-2"></i>تغيير الحالة</span>
+                          <span id="submit-btn-spinner" class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+                        </button>
+                      </form>
+                      {% if status_change_success %}
+                        <div class="alert alert-success mt-3 py-2 px-3 fade show" style="font-size:1em;transition:all 0.3s;">
+                          <i class="fas fa-check-circle me-1"></i> تم تحديث الحالة بنجاح.
+                        </div>
+                      {% endif %}
+                  </div>
+              </div>
+          </div>
+          <script>
+            // Dropdown status selection logic
+            document.querySelectorAll('.status-option').forEach(function(btn) {
+              btn.addEventListener('click', function() {
+                var value = this.getAttribute('data-value');
+                var label = this.textContent.trim();
+                document.getElementById('status-input').value = value;
+                document.getElementById('selected-status-label').textContent = label;
+              });
+            });
+            // Show spinner on submit
+            document.getElementById('status-form').addEventListener('submit', function() {
+              document.getElementById('status-submit-btn').disabled = true;
+              document.getElementById('submit-btn-text').classList.add('d-none');
+              document.getElementById('submit-btn-spinner').classList.remove('d-none');
+            });
+            // Enable Bootstrap tooltips
+            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+            tooltipTriggerList.map(function (tooltipTriggerEl) {
+              return new bootstrap.Tooltip(tooltipTriggerEl);
+            });
+          </script>
+          <style>
+            .animated-badge {
+              transition: background 0.3s, color 0.3s, box-shadow 0.3s;
+              box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+              font-weight: bold;
+              letter-spacing: 1px;
+              font-size: 1.2em;
+              border-radius: 2rem;
+              animation: pulse-badge 1.5s infinite alternate;
+            }
+            @keyframes pulse-badge {
+              0% { box-shadow: 0 0 0 0 rgba(23,162,184,0.2);}
+              100% { box-shadow: 0 0 12px 4px rgba(23,162,184,0.12);}
+            }
+            .dropdown-menu .dropdown-item:hover, .dropdown-menu .dropdown-item:focus {
+              background: #e3f2fd;
+              color: #1976d2;
+              transition: background 0.2s, color 0.2s;
+            }
+            .dropdown-menu .badge {
+              border: 2px solid #fff;
+              box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+            }
+            #status-submit-btn:disabled {
+              opacity: 0.7;
+              pointer-events: none;
+            }
+          </style>
+
+          <!-- Back Button -->
+          <div class="mt-4 text-center">
+              <a href="{% url 'panel:house' %}" class="btn btn-lg btn-outline-info px-5 rounded-pill shadow-sm fw-bold">
+                  <i class="fas fa-arrow-right me-2"></i> العودة إلى قائمة المواعيد المنزلية
+              </a>
+          </div>
+      </div>
+  </div>
+</div>
+
+<style>
+    .letter-spacing-1 { letter-spacing: 1px; }
+    .bg-gradient { background: linear-gradient(195deg, #49a3f1 0%, #1A73E8 100%) !important; }
+    .border-info-subtle { border-color: #b6e0ea !important; }
+    .table thead th { vertical-align: middle; }
+    .table td, .table th { vertical-align: middle; }
+    .rounded-4 { border-radius: 1.5rem !important; }
+    .rounded-top-4 { border-top-left-radius: 1.5rem !important; border-top-right-radius: 1.5rem !important; }
+    .rounded-bottom-4 { border-bottom-left-radius: 1.5rem !important; border-bottom-right-radius: 1.5rem !important; }
+    @media (max-width: 767px) {
+        .card-body { padding: 1.5rem !important; }
+        .table-responsive { font-size: 0.95rem; }
+        .h-app-img-wrapper {
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .h-app-img {
+            max-width: 90vw;
+            width: 100%;
+            height: auto;
+        }
+    }
+    /* Ensure appointment image is responsive and doesn't overflow */
+    .h-app-img-wrapper {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+    .h-app-img {
+        max-width: 350px;
+        width: 100%;
+        height: auto;
+        object-fit: contain;
+        display: inline-block;
+    }
+</style>
+
+{% endblock %}

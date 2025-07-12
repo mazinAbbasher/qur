@@ -1,0 +1,58 @@
+{# filepath: /home/mazin/projects/qur/templates/panel/clients_by_area.html #}
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>العملاء حسب المنطقة</h2>
+    <form method="get" class="row mb-3">
+        <div class="col-md-4">
+            <select name="area" class="form-control">
+                <option value="">كل المناطق</option>
+                {% for area in areas %}
+                    <option value="{{ area.id }}" {% if selected_area == area.id %}selected{% endif %}>{{ area.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary">عرض</button>
+        </div>
+    </form>
+    <table class="table table-bordered table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>الاسم</th>
+                <th>الهاتف</th>
+                <th>العنوان</th>
+                <th>إجمالي المبيعات</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for client in clients %}
+            <tr>
+                <td>{{ client.name }}</td>
+                <td>{{ client.phone }}</td>
+                <td>{{ client.address }}</td>
+                <td>{{ client.total_sales|default:0 }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="4" class="text-center">لا يوجد عملاء.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        {% if clients %}
+        <tfoot>
+            <tr>
+                <th colspan="3" class="text-end">إجمالي المبيعات للعملاء:</th>
+                <th>
+                    {{
+                        clients|map(attribute='total_sales')|sum
+                        if clients|length > 0
+                        else 0
+                    }}
+                </th>
+            </tr>
+        </tfoot>
+        {% endif %}
+    </table>
+</div>
+{% endblock %}

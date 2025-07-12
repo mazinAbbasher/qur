@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">قائمة المنتجات</h5>
+          {% comment %} <a href="{% url 'panel:product_add' %}" class="btn btn-success">إضافة منتج</a> {% endcomment %}
+        </div>
+        <div class="card-body">
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <a href="{% url 'panel:product_add' %}" class="btn btn-success">إضافة منتج</a>
+
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>السعر</th>
+                  <th>الحالة</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for product in products %}
+                <tr class="{% if not product.is_active %}table-warning{% endif %}">
+                  <td>{{ product.name }}</td>
+                  <td>{{ product.price|floatformat:"0"|intcomma }} جنيه</td>
+                  <td>
+                    {% if product.is_active %}
+                      <span class="badge bg-success">متاح</span>
+                    {% else %}
+                      <span class="badge bg-secondary">غير متاح</span>
+                    {% endif %}
+                  </td>
+                  <td>
+                    <a href="{% url 'panel:product_edit' product.pk %}" class="btn btn-primary btn-sm">تعديل</a>
+                    <a href="{% url 'panel:product_delete' product.pk %}" class="btn btn-danger btn-sm" onclick="return confirm('هل أنت متأكد من حذف المنتج نهائيًا؟');">حذف </a>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="4" class="text-center text-muted">لا توجد منتجات.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

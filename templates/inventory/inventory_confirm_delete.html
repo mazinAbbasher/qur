@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>حذف الدفعة من المخزون</h2>
+<p>هل أنت متأكد أنك تريد حذف الدفعة التالية؟</p>
+<ul>
+    <li>المنتج: {{ inventory.product.name }}</li>
+    <li>رقم التشغيلة: {{ inventory.batch_number }}</li>
+    <li>تاريخ الانتهاء: {{ inventory.expiry_date }}</li>
+    <li>الكمية: {{ inventory.quantity }}</li>
+</ul>
+<form method="post">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-danger">تأكيد الحذف</button>
+    <a href="{% url 'panel:inventory_list' %}" class="btn btn-secondary">إلغاء</a>
+</form>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4 mx-auto">
+  <div class="row justify-content-center">
+    <div class="col-md-12">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">قائمة الشحنات</h5>
+          <a href="{% url 'panel:shipment_create' %}" class="btn btn-success">إضافة شحنة جديدة</a>
+        </div>
+        <div class="card-body">
+          <form method="get" class="mb-3">
+            <div class="input-group">
+              <input type="text" name="search" class="form-control" placeholder="بحث عن منتج..." value="{{ search|default:'' }}">
+              <button class="btn btn-outline-secondary" type="submit">بحث</button>
+            </div>
+          </form>
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <div class="table-responsive">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th class="px-4 py-2 text-right font-bold">#</th>
+                  <th class="px-4 py-2 text-right font-bold">المنتج</th>
+                  <th class="px-4 py-2 text-right font-bold">الكمية</th>
+                  <th class="px-4 py-2 text-right font-bold">تكلفة الوحدة بالجنيه</th>
+                  <th class="px-4 py-2 text-right font-bold">تكاليف اضافيه (جنيه)</th>
+                  <th class="px-4 py-2 text-right font-bold">رقم التشغيلة</th>
+                  <th class="px-4 py-2 text-right font-bold">تاريخ الانتهاء</th>
+                  <th class="px-4 py-2 text-right font-bold">تاريخ الاستلام</th>
+                  <th class="px-4 py-2 text-right font-bold">إجراءات</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-100">
+                {% for shipment in shipments %}
+                <tr>
+                  <td class="px-4 py-2">{{ shipment.pk }}</td>
+                  <td class="px-4 py-2">{{ shipment.product.name }}</td>
+                  <td class="px-4 py-2">{{ shipment.quantity }}</td>
+                  <td class="px-4 py-2">
+                    {% if shipment.cost_sdg %}
+                      {{ shipment.cost_sdg|floatformat:"2"|intcomma }} SDG
+                    {% else %}
+                      -
+                    {% endif %}
+                  </td>
+                  <td class="px-4 py-2">{{ shipment.shipment_cost|floatformat:"2"|intcomma }} SDG</td>
+                  <td class="px-4 py-2">{{ shipment.batch_number }}</td>
+                  <td class="px-4 py-2">{{ shipment.expiry_date }}</td>
+                  <td class="px-4 py-2">{{ shipment.received_at|date:"Y-m-d H:i" }}</td>
+                  <td class="px-4 py-2">
+                    <div class="flex flex-row gap-2 justify-center">
+                      <a href="{% url 'panel:shipment_edit' shipment.pk %}"
+                         class="inline-flex items-center px-3 py-1 rounded bg-yellow-100 text-yellow-800 border border-yellow-300 hover:bg-yellow-200 transition text-xs font-semibold"
+                         title="تعديل">
+                        <i class="bi bi-pencil"></i> تعديل
+                      </a>
+                      {% comment %} {# Uncomment if delete is enabled
+                      <a href="{% url 'panel:shipment_delete' shipment.pk %}"
+                         class="inline-flex items-center px-3 py-1 rounded bg-red-100 text-red-800 border border-red-300 hover:bg-red-200 transition text-xs font-semibold"
+                         title="حذف">
+                        <i class="bi bi-trash"></i> حذف
+                      </a>
+                      #} {% endcomment %}
+                    </div>
+                  </td>
+                </tr>
+                {% empty %}
+                <tr>
+                  <td colspan="9" class="text-center text-muted py-4">لا توجد شحنات.</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if shipments.has_other_pages %}
+          <nav>
+            <ul class="pagination justify-content-center">
+              {% if shipments.has_previous %}
+                <li class="page-item"><a class="page-link" href="?page={{ shipments.previous_page_number }}{% if search %}&search={{ search }}{% endif %}">السابق</a></li>
+              {% else %}
+                <li class="page-item disabled"><span class="page-link">السابق</span></li>
+              {% endif %}
+              {% for num in shipments.paginator.page_range %}
+                {% if shipments.number == num %}
+                  <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+                {% else %}
+                  <li class="page-item"><a class="page-link" href="?page={{ num }}{% if search %}&search={{ search }}{% endif %}">{{ num }}</a></li>
+                {% endif %}
+              {% endfor %}
+              {% if shipments.has_next %}
+                <li class="page-item"><a class="page-link" href="?page={{ shipments.next_page_number }}{% if search %}&search={{ search }}{% endif %}">التالي</a></li>
+              {% else %}
+                <li class="page-item disabled"><span class="page-link">التالي</span></li>
+              {% endif %}
+            </ul>
+          </nav>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

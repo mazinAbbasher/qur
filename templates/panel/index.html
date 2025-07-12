@@ -1,0 +1,276 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% load static %}
+{% block content %}
+
+<div class="container-fluid py-4">
+  <div class="row">
+    <div class="card-header pb-5 position-relative mt-n4 mx-3 z-index-2">
+      <div class="bg-gradient-info shadow-primary border-radius-lg px-2 pt-4 pb-3">
+        <h6 class="text-white text-capitalize ps-3">لوحة التحكم</h6>
+      </div>
+    </div>
+    <!-- Key Metrics Cards -->
+    <div class="col-lg-3 col-sm-6 mb-4">
+      <div class="card">
+        <div class="card-header p-3 pt-2">
+          <div class="icon icon-lg icon-shape bg-gradient-success shadow-dark text-center border-radius-xl mt-n4 position-absolute">
+            <i class="material-icons opacity-10"><img src="{% static "assets/img/sales.svg" %}"></i>
+          </div>
+          <div class="text-start pt-1">
+            <p class="text-sm mb-0 text-capitalize">إجمالي المبيعات</p>
+          </div>
+        </div>
+        <hr class="dark horizontal my-0">
+        <div class="card-footer p-3">
+          <h6 class="mb-0 mt-3 text-success">{{ total_sales|floatformat:"2"|intcomma }} جنيه</h6>
+          {% comment %} <a href="{% url 'panel:sale_list' %}" class="btn btn-link p-0">عرض المبيعات</a> {% endcomment %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-sm-6 mb-4">
+      <div class="card">
+        <div class="card-header p-3 pt-2">
+          <div class="icon icon-lg icon-shape bg-gradient-primary shadow-dark text-center border-radius-xl mt-n4 position-absolute">
+            <i class="material-icons opacity-10"><img src="{% static "assets/img/paid.svg" %}"></i>
+          </div>
+          <div class="text-start pt-1">
+            <p class="text-sm mb-0 text-capitalize">صافي الربح</p>
+          </div>
+        </div>
+        <hr class="dark horizontal my-0">
+        <div class="card-footer p-3">
+          <h6 class="mb-0 mt-3 text-info">{{ net_profit|floatformat:"2"|intcomma }} جنيه</h6>
+          {% comment %} <a href="{% url 'panel:net_profit_dashboard' %}" class="btn btn-link p-0">تفاصيل الربح</a> {% endcomment %}
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3 col-sm-6 mb-4">
+      <div class="card">
+        <div class="card-header p-3 pt-2">
+          <div class="icon icon-lg icon-shape bg-gradient-warning shadow-dark text-center border-radius-xl mt-n4 position-absolute">
+            <i class="material-icons opacity-10"><img src="{% static "assets/img/orders.svg" %}"></i>
+          </div>
+          <div class="text-start pt-1">
+            <p class="text-sm mb-0 text-capitalize">الفواتير غير المدفوعة</p>
+          </div>
+        </div>
+        <hr class="dark horizontal my-0">
+        <div class="card-footer p-3">
+          <h6 class="mb-0 mt-3 text-danger">{{ outstanding_invoices|length }}</h6>
+          {% comment %} <a href="{% url 'panel:invoice_list' %}" class="btn btn-link p-0">عرض الفواتير</a> {% endcomment %}
+        </div>
+      </div>
+    </div>
+    <!-- Monthly Summary Card -->
+    {% comment %} <div class="col-lg-3 col-sm-6 mb-4">
+      <div class="card">
+        <div class="card-header p-3 pt-2">
+          <div class="icon icon-lg icon-shape bg-gradient-dark shadow-dark text-center border-radius-xl mt-n4 position-absolute">
+            <i class="material-icons opacity-10"><img src="{% static "assets/img/reports.svg" %}"></i>
+          </div>
+          <div class="text-start pt-1">
+            <p class="text-sm mb-0 text-capitalize">ملخص الشهر الحالي</p>
+          </div>
+        </div>
+        <hr class="dark horizontal my-0">
+        <div class="card-footer p-3">
+          <div class="mb-1"><span class="text-muted">مبيعات:</span> <span class="text-success">{{ month_total_sales|floatformat:"2"|intcomma }} جنيه</span></div>
+          <div><span class="text-muted">صافي الربح:</span> <span class="text-info">{{ month_net_profit|floatformat:"2"|intcomma }} جنيه</span></div>
+        </div>
+      </div>
+    </div> {% endcomment %}
+    <!-- Debts Card -->
+    <div class="col-lg-3 col-sm-6 mb-4">
+      <div class="card">
+        <div class="card-header p-3 pt-2">
+          <div class="icon icon-lg icon-shape bg-gradient-danger shadow-dark text-center border-radius-xl mt-n4 position-absolute">
+            <i class="material-icons opacity-10"><img src="{% static "assets/img/paid.svg" %}" alt="Debts"></i>
+          </div>
+          <div class="text-start pt-1">
+            <p class="text-sm mb-0 text-capitalize">الديون</p>
+          </div>
+        </div>
+        <hr class="dark horizontal my-0">
+        <div class="card-footer p-3">
+          <h6 class="mb-0 mt-3 text-danger">
+            <a href="{% url 'panel:debts' %}" class="text-danger text-decoration-none">عرض الديون</a>
+          </h6>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col-md-4">
+      <a href="{{ shipment_profit_url }}" class="text-decoration-none">
+        <div class="card shadow-lg border-0 h-100 transition-card" style="transition: box-shadow 0.2s;">
+          <div class="card-body text-center py-4">
+            <div class="icon icon-lg icon-shape bg-gradient-info shadow text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" style="width:64px;height:64px;">
+              <img src="{% static 'assets/img/paid.svg' %}" alt="Shipment Profit" style="height:32px;">
+            </div>
+            <h5 class="card-title mt-2 mb-1 fw-bold text-info">أرباح الشحنات</h5>
+            <p class="card-text text-muted small">تقرير أرباح الشحنات بالتفصيل</p>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-4">
+      <a href="{{ inventory_url }}" class="text-decoration-none">
+        <div class="card shadow-lg border-0 h-100 transition-card" style="transition: box-shadow 0.2s;">
+          <div class="card-body text-center py-4">
+            <div class="icon icon-lg icon-shape bg-gradient-warning shadow text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" style="width:64px;height:64px;">
+              <img src="{% static 'assets/img/products2.svg' %}" alt="Inventory" style="height:32px;">
+            </div>
+            <h5 class="card-title mt-2 mb-1 fw-bold text-warning">المخزون</h5>
+            <p class="card-text text-muted small">عرض تفاصيل المخزون الحالي</p>
+          </div>
+        </div>
+      </a>
+    </div>
+    <div class="col-md-4">
+      <a href="{{ net_profit_url }}" class="text-decoration-none">
+        <div class="card shadow-lg border-0 h-100 transition-card" style="transition: box-shadow 0.2s;">
+          <div class="card-body text-center py-4">
+            <div class="icon icon-lg icon-shape bg-gradient-success shadow text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" style="width:64px;height:64px;">
+              <img src="{% static 'assets/img/paid.svg' %}" alt="Net Profit" style="height:32px;">
+            </div>
+            <h5 class="card-title mt-2 mb-1 fw-bold text-success">صافي الأرباح</h5>
+            <p class="card-text text-muted small">تقرير صافي الأرباح</p>
+          </div>
+        </div>
+      </a>
+    </div>
+  </div>
+  <style>
+    .transition-card:hover {
+      box-shadow: 0 8px 32px 0 rgba(0,123,255,0.15), 0 1.5px 6px 0 rgba(0,0,0,0.10);
+      transform: translateY(-4px) scale(1.03);
+      transition: box-shadow 0.2s, transform 0.2s;
+    }
+    .transition-card .icon-shape {
+      transition: background 0.2s;
+    }
+    .transition-card:hover .bg-gradient-info {
+      background: linear-gradient(87deg, #11cdef 0, #1171ef 100%) !important;
+    }
+    .transition-card:hover .bg-gradient-warning {
+      background: linear-gradient(87deg, #fbcf33 0, #f53939 100%) !important;
+    }
+    .transition-card:hover .bg-gradient-success {
+      background: linear-gradient(87deg, #2dce89 0, #2dcecc 100%) !important;
+    }
+  </style>
+
+  <!-- Recent Sales and Expenses -->
+  {% comment %} <div class="row">
+    <div class="col-lg-6 mb-4">
+      <div class="card">
+        <div class="card-header bg-gradient-primary">
+          <h6 class="text-white mb-0">آخر المبيعات</h6>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>رقم البيع</th>
+                <th>العميل</th>
+                <th>المبلغ</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for sale in recent_sales %}
+                <tr>
+                  <td>{{ sale.pk }}</td>
+                  <td>{{ sale.client }}</td>
+                  <td>{{ sale.total|floatformat:2 }}</td>
+                  <td>{{ sale.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="4" class="text-center text-muted">لا توجد مبيعات حديثة.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6 mb-4">
+      <div class="card">
+        <div class="card-header bg-gradient-secondary">
+          <h6 class="text-white mb-0">آخر المصروفات</h6>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-hover mb-0">
+            <thead>
+              <tr>
+                <th>الوصف</th>
+                <th>الفئة</th>
+                <th>المبلغ</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for expense in recent_expenses %}
+                <tr>
+                  <td>{{ expense.description }}</td>
+                  <td>{{ expense.get_category_display }}</td>
+                  <td>{{ expense.amount|floatformat:2 }}</td>
+                  <td>{{ expense.date|date:"Y-m-d" }}</td>
+                </tr>
+              {% empty %}
+                <tr><td colspan="4" class="text-center text-muted">لا توجد مصروفات حديثة.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div> {% endcomment %}
+
+  <!-- Alerts for Due Payments -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header bg-gradient-info">
+          <h6 class="text-white mb-0"> الفواتير المستحقة قريباً</h6>
+        </div>
+        <div class="card-body">
+          {% if upcoming_due_invoices %}
+            <table class="table table-bordered">
+              <thead>
+                <tr>
+                  <th>رقم الفاتورة</th>
+                  <th>العميل</th>
+                  <th>المبلغ</th>
+                  <th>تاريخ الاستحقاق</th>
+                  <th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for invoice in upcoming_due_invoices %}
+                  <tr class="{% if invoice.status == 'unpaid' %}table-danger{% endif %}">
+                    <td>{{ invoice.number }}</td>
+                    <td>{{ invoice.sale.client }}</td>
+                    <td>{{ invoice.total|floatformat:2|intcomma }}</td>
+                    <td>{{ invoice.due_date }}</td>
+                    <td>
+                      {% if invoice.status == 'unpaid' %}
+                        <span class="badge bg-danger">غير مدفوعة</span>
+                      {% else %}
+                        <span class="badge bg-success">مدفوعة</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% else %}
+            <p class="text-muted">لا توجد فواتير مستحقة خلال الأسبوع القادم.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

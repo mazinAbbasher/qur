@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% load humanize static %}
+{% block content %}
+<div class="container py-4">
+  {% if messages and not pdf_mode %}
+    {% for message in messages %}
+      <div class="alert alert-success">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+  {% if invoice.status == 'unpaid' and not pdf_mode %}
+    <div style="position:fixed;top:40%;left:25%;font-size:4em;color:#dc354580;transform:rotate(-20deg);z-index:0;pointer-events:none;">
+      غير مدفوعة
+    </div>
+  {% elif invoice.status == 'partial' and not pdf_mode %}
+    <div style="position:fixed;top:40%;left:25%;font-size:4em;color:#ffc10780;transform:rotate(-20deg);z-index:0;pointer-events:none;">
+      مدفوعة جزئياً
+    </div>
+  {% endif %}
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-gradient-info text-white d-flex align-items-center" style="border-radius:8px 8px 0 0;">
+          <img src="{% static 'logo.png' %}" alt="Logo" style="width:60px;height:60px;object-fit:contain;margin-left:16px;">
+          <div>
+            <h5 class="mb-0">شركة الأدوية الحديثة</h5>
+            <div style="font-size:1em;">العنوان: الخرطوم - السودان | هاتف: 0123456789</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <table class="table table-borderless mb-2" style="width:100%;">
+            <tr>
+              <td><strong>رقم الفاتورة:</strong> {{ invoice.pk }}</td>
+              <td>
+                <strong>الحالة:</strong>
+                <span class="badge 
+                  {% if invoice.status == 'paid' %}bg-success
+                  {% elif invoice.status == 'partial' %}bg-warning text-dark
+                  {% else %}bg-danger{% endif %}"
+                  title="{% if invoice.status == 'paid' %}تم دفع كامل المبلغ{% elif invoice.status == 'partial' %}تم دفع جزء من المبلغ{% else %}لم يتم دفع أي مبلغ{% endif %}">
+                  {% if invoice.status == 'paid' %}مدفوعة
+                  {% elif invoice.status == 'partial' %}مدفوعة جزئياً
+                  {% else %}غير مدفوعة{% endif %}
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td><strong>تاريخ الفاتورة:</strong> {{ invoice.created_at|date:"Y-m-d H:i" }}</td>
+              <td><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d" }}</td>
+            </tr>
+            <tr>
+              <td colspan="2">
+                <strong>المدفوع:</strong>
+                <span class="text-success">{{ invoice.paid_amount|floatformat:"2"|intcomma }} SDG</span>
+                <span class="mx-2"></span>
+                <strong>المتبقي:</strong>
+                <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
+                  {{ invoice.remaining_amount|floatformat:"2"|intcomma }} SDG
+                </span>
+              </td>
+            </tr>
+          </table>
+          <div class="mb-3">
+            <strong>العميل:</strong> {{ invoice.sale.client.name }}<br>
+            <strong>الهاتف:</strong> {{ invoice.sale.client.phone|default:"-" }}<br>
+            <strong>العنوان:</strong> {{ invoice.sale.client.address|default:"-" }}<br>
+            <strong>المنطقة:</strong> {{ invoice.sale.client.area|default:"-" }}
+          </div>
+          <hr>
+          <h6>تفاصيل المنتجات</h6>
+          <div class="table-responsive">
+            <table class="table table-bordered align-middle">
+              <thead>
+                <tr>
+                  <th>المنتج</th>
+                  <th>الدفعة</th>
+                  <th>تاريخ الانتهاء</th>
+                  <th>الكمية</th>
+                  <th>السعر</th>
+                  <th>الإجمالي</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in invoice.sale.items.all %}
+                <tr>
+                  <td>{{ item.inventory.product.name }}</td>
+                  <td>{{ item.inventory.batch_number }}</td>
+                  <td>{{ item.inventory.expiry_date }}</td>
+                  <td>{{ item.quantity }}</td>
+                  <td>{{ item.price|floatformat:"2"|intcomma }}</td>
+                  <td>{{ item.get_total|floatformat:"2"|intcomma }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th colspan="5" class="text-end">الإجمالي الكلي</th>
+                  <th>{{ invoice.total|floatformat:"2"|intcomma }}</th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          {% if payments %}
+          <div class="mt-4">
+            <h6>سجل الدفعات</h6>
+            <table class="table table-sm table-bordered">
+              <thead>
+                <tr>
+                  <th>التاريخ</th>
+                  <th>المبلغ</th>
+                  <th>ملاحظة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in payments %}
+                <tr>
+                  <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
+                  <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
+                  <td>{{ p.note|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% endif %}
+          {% if payment_form and not pdf_mode and invoice.status != 'paid' %}
+          <div class="mt-4">
+            <h6>إضافة دفعة جديدة</h6>
+            <form method="post" action="{% url 'panel:invoice_add_payment' invoice.pk %}">
+              {% csrf_token %}
+              <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                  {{ payment_form.amount.label_tag }} {{ payment_form.amount }}
+                </div>
+                <div class="col-md-5">
+                  {{ payment_form.note.label_tag }} {{ payment_form.note }}
+                </div>
+                <div class="col-md-3">
+                  <button type="submit" class="btn btn-primary">إضافة دفعة</button>
+                </div>
+              </div>
+            </form>
+          </div>
+          {% endif %}
+          <div class="mt-4 d-flex justify-content-between align-items-center">
+            <span>
+              <strong>الحالة:</strong>
+              {% if invoice.status == 'paid' %}
+                <span class="text-success">مدفوعة</span>
+              {% elif invoice.status == 'partial' %}
+                <span class="text-warning">مدفوعة جزئياً</span>
+              {% else %}
+                <span class="text-danger">غير مدفوعة</span>
+              {% endif %}
+            </span>
+            {% if not pdf_mode %}
+            <div>
+              <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" target="_blank">
+                تحميل PDF
+              </a>
+              {% if invoice.status != 'paid' %}
+                <form method="post" action="{% url 'panel:invoice_mark_paid' invoice.pk %}" style="display:inline;">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-success ms-2">تحديد كمدفوعة</button>
+                </form>
+              {% endif %}
+              {% if invoice.status != 'unpaid' %}
+                {% comment %} <form method="post" action="{% url 'panel:invoice_mark_unpaid' invoice.pk %}" style="display:inline;">
+                  {% csrf_token %}
+                  <button type="submit" class="btn btn-danger ms-2">تحديد كغير مدفوعة</button>
+                </form> {% endcomment %}
+              {% endif %}
+            </div>
+            {% endif %}
+          </div>
+          <div class="footer mt-4" style="font-size:0.95em; color:#888; text-align:center;">
+            تم توليد هذه الفاتورة بواسطة النظام في {{ invoice.created_at|date:"Y-m-d H:i" }}<br>
+            <span>جميع الحقوق محفوظة &copy; شركة الأدوية الحديثة {{ invoice.created_at|date:"Y" }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

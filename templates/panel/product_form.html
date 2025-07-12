@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .form-control {
+    border-radius: 0.55rem !important; 
+    border: 1px solid #ced4da !important;
+    padding: 0.375rem 0.55rem !important;
+    font-size: 1rem !important;
+    line-height: 1.5 !important;
+    color:rgb(14, 124, 235) !important;
+    background-color: #fff !important;
+    background-clip: padding-box !important;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out !important;
+  }
+</style>
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-6">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">
+            {% if product %}تعديل المنتج{% else %}إضافة منتج جديد{% endif %}
+          </h5>
+        </div>
+        <div class="card-body">
+          <form method="post">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label for="name" class="form-label">اسم المنتج</label>
+              <input type="text" class="form-control" id="name" name="name"
+                     value="{{ product.name|default_if_none:'' }}" required>
+            </div>
+            <div class="mb-3">
+              <label for="price" class="form-label">السعر</label>
+              <input type="number" class="form-control" id="price" name="price" step="1"
+                     value="{{ product.price|default_if_none:''|floatformat:"0" }}" required>
+            </div>
+            {% if product %}
+            <div class="form-check mb-3">
+              <input class="form-check-input" type="checkbox" id="is_active" name="is_active" value="1" {% if product.is_active %}checked{% endif %}>
+              <label class="form-check-label" for="is_active">
+                متاح للطلبات
+              </label>
+            </div>
+            {% endif %}
+            <button type="submit" class="btn btn-success">
+              {% if product %}تحديث{% else %}إضافة{% endif %}
+            </button>
+            <a href="{% url 'panel:product_list' %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

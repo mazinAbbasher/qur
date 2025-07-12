@@ -1,0 +1,13 @@
+.env
+.venv
+api/__pycache__
+api/migrations/__pycache__
+.vscode/
+Pipfile
+Pipfile.lock
+__pycache__
+env/
+# db.sqlite3
+# /images/
+# /static/
+# !/api/static/

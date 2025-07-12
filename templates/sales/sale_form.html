@@ -1,0 +1,546 @@
+{% extends "base.html" %}
+{% load static %}
+{% comment %} {% load dict_extras %} {% endcomment %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-10 col-md-12">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">
+            {% if sale %}تعديل عملية بيع{% else %}إضافة عملية بيع{% endif %}
+          </h5>
+        </div>
+        <div class="card-body">
+          <form method="post" id="sale-form" autocomplete="off">
+            {% csrf_token %}
+            <div class="row mb-3">
+              <div class="col-md-4 mb-2">
+                <label for="id_client" class="form-label fw-semibold">العميل <span class="text-danger">*</span></label>
+                {{ sale_form.client }}
+              </div>
+              <div class="col-md-4 mb-2">
+                <label for="id_employee" class="form-label fw-semibold">المندوب <span class="text-danger">*</span></label>
+                {{ sale_form.employee }}
+              </div>
+              <div class="col-md-4 mb-2">
+                <label for="id_due_date" class="form-label fw-semibold">تاريخ الاستحقاق <span class="text-danger">*</span></label>
+                {{ sale_form.due_date }}
+              </div>
+              <!-- Removed commission field -->
+            </div>
+            <hr>
+            <div class="bg-light rounded-3 p-3 mb-3">
+              <h6 class="mb-3 fw-bold">المنتجات المباعة</h6>
+              <div id="saleitems-formset">
+                {{ formset.management_form }}
+                {% if products_with_batches %}
+                <div class="table-responsive">
+                  <table class="table table-bordered align-middle table-hover mb-0" id="saleitems-table" style="min-width:900px;">
+                    <thead class="table-light sticky-top">
+                      <tr>
+                        <th class="text-center">المنتج <span class="text-danger">*</span></th>
+                        <th class="text-center">رقم التشغيلة <span class="text-danger">*</span></th>
+                        <th class="text-center">تاريخ الانتهاء</th>
+                        <th class="text-center">الكمية <span class="text-danger">*</span></th>
+                        <th class="text-center">السعر <span class="text-danger">*</span></th>
+                        <th class="text-center">الإجمالي</th>
+                        <th class="text-center"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for form in formset.forms %}
+                      {% with inv=form.instance.inventory %}
+                      <tr class="saleitem-row" data-form-index="{{ forloop.counter0 }}">
+                        <td>
+                          <select name="{{ form.prefix }}-product" class="form-select product-select" required>
+                            <option value="" disabled {% if not inv %}selected{% endif %}>اختر المنتج</option>
+                            {% for product in products_with_batches %}
+                              <option value="{{ product.pk }}"
+                                {% if inv and inv.product.pk == product.pk %}selected{% endif %}>
+                                {{ product.name }}
+                              </option>
+                            {% endfor %}
+                          </select>
+                          <small class="text-muted">اختر المنتج أولاً</small>
+                        </td>
+                        <td>
+                          <select name="{{ form.prefix }}-batch" class="form-select batch-select" required>
+                            <option value="" disabled {% if not inv %}selected{% endif %}>اختر الدفعة</option>
+                            {% if inv %}
+                              {% for batch in inventories_by_product|get_item:inv.product.pk %}
+                                <option value="{{ batch.pk }}"
+                                  {% if batch.pk == inv.pk %}selected{% endif %}>
+                                  {{ batch.shipment.batch_number }}
+                                </option>
+                              {% endfor %}
+                            {% else %}
+                              {% for batch in inventories_by_product|get_item:products_with_batches.0.pk %}
+                                <option value="{{ batch.pk }}">{{ batch.shipment.batch_number }}</option>
+                              {% endfor %}
+                            {% endif %}
+                          </select>
+                          <small class="text-muted">اختر الدفعة بعد اختيار المنتج</small>
+                        </td>
+                        <td>
+                          <input type="text" class="form-control expiry-date bg-white" value="{% if inv %}{{ inv.shipment.expiry_date }}{% else %}-{% endif %}" readonly>
+                        </td>
+                        <td>
+                          <div class="input-group">
+                            {{ form.quantity }}
+                            <span class="input-group-text">وحدة</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="input-group">
+                            {{ form.price }}
+                            <span class="input-group-text">جنيه</span>
+                          </div>
+                        </td>
+                        <td class="item-total text-success fw-bold text-center">
+                          {% if form.instance.pk %}
+                            {{ form.instance.get_total }}
+                          {% else %}
+                            0
+                          {% endif %}
+                        </td>
+                        <td class="text-center">
+                          <button type="button" class="btn btn-danger btn-sm remove-saleitem" title="حذف">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                          {% if form.DELETE %}
+                            {{ form.DELETE }}
+                          {% endif %}
+                        </td>
+                      </tr>
+                      {% endwith %}
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="mt-2">
+                  <button type="button" class="btn btn-outline-secondary" id="add-saleitem" {% if not products_with_batches %}disabled{% endif %}>
+                    <i class="bi bi-plus-circle"></i> إضافة منتج
+                  </button>
+                </div>
+                {% else %}
+                  <div class="alert alert-warning text-center my-3">
+                    لا توجد منتجات متاحة للبيع حالياً (كل المخزون صفر).
+                  </div>
+                {% endif %}
+              </div>
+            </div>
+            <div class="row align-items-center mb-2">
+              <div class="col-md-6">
+                <strong>الإجمالي الكلي:</strong>
+              </div>
+              <div class="col-md-6 text-end">
+                <span id="sale-total" class="fs-5 text-success">0</span> جنيه
+              </div>
+            </div>
+            <div class="mt-4 d-flex gap-2 justify-content-end">
+              <button type="submit" class="btn btn-success px-4">
+                <i class="bi bi-check-circle"></i>
+                {% if sale %}تحديث{% else %}حفظ{% endif %}
+              </button>
+              <a href="{% url 'panel:sale_list' %}" class="btn btn-secondary px-4">
+                <i class="bi bi-x-circle"></i> إلغاء
+              </a>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+  .table thead th.sticky-top {
+    position: sticky;
+    top: 0;
+    background: #f8f9fa;
+    z-index: 2;
+  }
+  .saleitem-row:hover {
+    background: #f1f3f6;
+  }
+  .input-group-text {
+    min-width: 48px;
+    justify-content: center;
+  }
+  .form-select:invalid {
+    border-color: #dc3545;
+  }
+</style>
+<script src="{% static "assets/js/bootstrap.bundle.min.js" %}"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Enable Bootstrap tooltips
+  var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+    new bootstrap.Tooltip(tooltipTriggerEl);
+  });
+
+  // Helper to get the correct prefix for management form
+  function getFormsetPrefix() {
+    let totalFormsInput = document.querySelector('input[name$="-TOTAL_FORMS"]');
+    if (totalFormsInput) {
+      let name = totalFormsInput.name;
+      return name.replace('-TOTAL_FORMS', '');
+    }
+    return 'items'; // fallback
+  }
+
+  function recalcTotals() {
+    let total = 0;
+    document.querySelectorAll('.saleitem-row').forEach(function(row) {
+      let delInput = row.querySelector('input[type="checkbox"][name$="DELETE"]');
+      if (delInput && delInput.checked) return;
+      let qtyInput = row.querySelector('input[name$="quantity"]');
+      let priceInput = row.querySelector('input[name$="price"]');
+      let qty = qtyInput ? parseFloat(qtyInput.value) || 0 : 0;
+      let price = priceInput ? parseFloat(priceInput.value) || 0 : 0;
+      let itemTotal = qty * price;
+      row.querySelector('.item-total').textContent = itemTotal.toFixed(2);
+      total += itemTotal;
+    });
+    document.getElementById('sale-total').textContent = total.toFixed(2);
+  }
+
+  // Log the current formset data for debugging
+  function logFormset() {
+    const form = document.getElementById('sale-form');
+    if (!form) return;
+    const data = new FormData(form);
+    let obj = {};
+    data.forEach((value, key) => {
+      if (obj[key]) {
+        if (!Array.isArray(obj[key])) obj[key] = [obj[key]];
+        obj[key].push(value);
+      } else {
+        obj[key] = value;
+      }
+    });
+    //console.log('Current formset data:', obj);
+  }
+
+  const saleitemsTable = document.getElementById('saleitems-table');
+  if (saleitemsTable) {
+    saleitemsTable.addEventListener('input', function(e) {
+      if (e.target.name && (e.target.name.endsWith('quantity') || e.target.name.endsWith('price'))) {
+        recalcTotals();
+        logFormset();
+      }
+    });
+  }
+
+  // Remove saleitem row
+  function attachRemoveEvents() {
+    document.querySelectorAll('.remove-saleitem').forEach(function(btn) {
+      btn.onclick = function() {
+        let row = btn.closest('tr');
+        let delInput = row.querySelector('input[type="checkbox"][name$="DELETE"]');
+        if (delInput) {
+          delInput.checked = true;
+          row.style.display = 'none';
+        } else {
+          row.remove();
+          let prefix = getFormsetPrefix();
+          let totalForms = document.getElementById('id_' + prefix + '-TOTAL_FORMS');
+          if (totalForms) {
+            totalForms.value = document.querySelectorAll('.saleitem-row').length;
+          }
+        }
+        recalcTotals();
+        logFormset();
+      }
+    });
+  }
+  attachRemoveEvents();
+
+  // Helper: get inventory details by id from a JS object
+  const inventoryData = {
+    {% for inv in inventories %}
+      "{{ inv.pk }}": {
+        "product": "{{ inv.product.name|escapejs }}",
+        "batch": "{{ inv.shipment.batch_number|escapejs }}",
+        "expiry": "{{ inv.shipment.expiry_date }}",
+        "quantity": "{{ inv.quantity }}"
+      }{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  };
+
+  // Prepare product-batch-expiry data
+  const productBatchData = {};
+  {% for product in products_with_batches %}
+    productBatchData["{{ product.pk }}"] = [
+      {% for inv in inventories_by_product|get_item:product.pk %}
+        {
+          id: "{{ inv.pk }}",
+          batch: "{{ inv.shipment.batch_number|escapejs }}",
+          expiry: "{{ inv.shipment.expiry_date }}",
+        }{% if not forloop.last %},{% endif %}
+      {% endfor %}
+    ];
+  {% endfor %}
+
+  // Helper to get first product with batches
+  function getFirstProductWithBatch() {
+    for (const [prodId, batches] of Object.entries(productBatchData)) {
+      if (batches.length > 0) return {prodId, batch: batches[0]};
+    }
+    return {prodId: null, batch: null};
+  }
+
+  // Helper: get shipment.sale_usd for each inventory (batch) by matching product and batch_number
+  // Use mapping from Django context: batch_shipment_saleusd
+  const batchShipmentSaleUSD = {
+    {% for inv in inventories %}
+      "{{ inv.pk }}": {{ inv.shipment.sale_usd|default:0 }}{% if not forloop.last %},{% endif %}
+    {% endfor %}
+  };
+
+  // Helper: get product exchange_rate for each product
+  const productExchangeRates = {
+    {% for product in products_with_batches %}
+      "{{ product.pk }}": {{ product.exchange_rate|default:0 }},
+    {% endfor %}
+  };
+
+  // Update price field when product or batch changes
+  function updatePrice(row, productId, batchId) {
+    const priceInput = row.querySelector('input[name$="price"]');
+    let price = 0;
+    if (productId && batchId && batchShipmentSaleUSD[batchId] !== undefined && productExchangeRates[productId] !== undefined) {
+      price = parseFloat(batchShipmentSaleUSD[batchId]) * parseFloat(productExchangeRates[productId]);
+    }
+    if (priceInput) {
+      priceInput.value = price.toFixed(2);
+    }
+  }
+
+  // Update batch select and expiry date when product changes
+  function updateBatchAndExpiry(row, productId, selectedBatchId) {
+    const batchSelect = row.querySelector('.batch-select');
+    const expiryInput = row.querySelector('.expiry-date');
+    const batches = productBatchData[productId] || [];
+    batchSelect.innerHTML = '';
+    batches.forEach(batch => {
+      const opt = document.createElement('option');
+      opt.value = batch.id;
+      opt.textContent = batch.batch;
+      if (selectedBatchId && batch.id === selectedBatchId) {
+        opt.selected = true;
+      }
+      batchSelect.appendChild(opt);
+    });
+    // Set expiry date for selected batch
+    let selected = batches.find(b => b.id === (selectedBatchId || (batches[0] && batches[0].id)));
+    expiryInput.value = selected ? selected.expiry : '-';
+    // Set price for this product and batch
+    let batchId = selected ? selected.id : (batches[0] && batches[0].id);
+    updatePrice(row, productId, batchId);
+  }
+
+  // Attach product/batch change events for a row
+  function attachProductBatchEvents(row) {
+    const productSelect = row.querySelector('.product-select');
+    const batchSelect = row.querySelector('.batch-select');
+    const expiryInput = row.querySelector('.expiry-date');
+    if (!productSelect || !batchSelect) return;
+    productSelect.onchange = function() {
+      updateBatchAndExpiry(row, this.value, null);
+      recalcTotals();
+    };
+    batchSelect.onchange = function() {
+      const batches = productBatchData[productSelect.value] || [];
+      const selected = batches.find(b => b.id === this.value);
+      expiryInput.value = selected ? selected.expiry : '-';
+      updatePrice(row, productSelect.value, this.value);
+      recalcTotals();
+    };
+    // Set price on load
+    let batchId = batchSelect.value;
+    updatePrice(row, productSelect.value, batchId);
+  }
+
+  // Attach events for all existing rows
+  document.querySelectorAll('.saleitem-row').forEach(function(row) {
+    attachProductBatchEvents(row);
+  });
+
+  // Add new saleitem row
+  document.getElementById('add-saleitem')?.addEventListener('click', function() {
+    let prefix = getFormsetPrefix();
+    let formIdx = document.querySelectorAll('.saleitem-row').length;
+    let productOptions = `<option value="" disabled selected>اختر المنتج</option>`;
+    {% for product in products_with_batches %}
+      productOptions += `<option value="{{ product.pk }}"{% if forloop.first %} selected{% endif %}>{{ product.name }}</option>`;
+    {% endfor %}
+    let batchOptions = `<option value="" disabled selected>اختر الدفعة</option>`;
+    {% if products_with_batches %}
+      {% for batch in inventories_by_product|get_item:products_with_batches.0.pk %}
+        batchOptions += `<option value="{{ batch.pk }}"{% if forloop.first %} selected{% endif %}>{{ batch.shipment.batch_number }}</option>`;
+      {% endfor %}
+    {% endif %}
+    let expiryVal = '';
+    {% if products_with_batches %}
+      {% with batches=inventories_by_product|get_item:products_with_batches.0.pk %}
+        {% if batches %}
+          expiryVal = "{{ batches.0.shipment.expiry_date }}";
+        {% else %}
+          expiryVal = "-";
+        {% endif %}
+      {% endwith %}
+    {% else %}
+      expiryVal = "-";
+    {% endif %}
+    let priceVal = 0;
+    {% if products_with_batches %}
+      {% with batches=inventories_by_product|get_item:products_with_batches.0.pk %}
+        {% if batches %}
+          {% with batch=batches.0 %}
+            {% with shipments=batch.product.shipment_set.all|dictsortreversed:"received_at" %}
+              {% with shipment=shipments|first %}
+                {% if shipment and shipment.sale_usd %}
+                  priceVal = ({{ shipment.sale_usd|floatformat:2 }} * {{ batch.product.exchange_rate|default:0 }});
+                {% else %}
+                  priceVal = 0;
+                {% endif %}
+              {% endwith %}
+            {% endwith %}
+          {% endwith %}
+        {% else %}
+          priceVal = 0;
+        {% endif %}
+      {% endwith %}
+    {% endif %}
+    let emptyRow = `
+      <tr class="saleitem-row" data-form-index="${formIdx}">
+        <td>
+          <select name="${prefix}-${formIdx}-product" class="form-select product-select" required>
+            ${productOptions}
+          </select>
+          <small class="text-muted">اختر المنتج أولاً</small>
+        </td>
+        <td>
+          <select name="${prefix}-${formIdx}-batch" class="form-select batch-select" required>
+            ${batchOptions}
+          </select>
+          <small class="text-muted">اختر الدفعة بعد اختيار المنتج</small>
+        </td>
+        <td>
+          <input type="text" class="form-control expiry-date" value="${expiryVal}" readonly>
+        </td>
+        <td><input type="number" name="${prefix}-${formIdx}-quantity" class="form-control" value="1" min="1"></td>
+        <td>
+          <input type="number" name="${prefix}-${formIdx}-price" class="form-control bg-light" value="${parseFloat(priceVal).toFixed(2)}" step="0.01" readonly tabindex="-1">
+        </td>
+        <td class="item-total">0</td>
+        <td>
+          <button type="button" class="btn btn-danger btn-sm remove-saleitem">حذف</button>
+        </td>
+      </tr>
+    `;
+    document.querySelector('#saleitems-table tbody').insertAdjacentHTML('beforeend', emptyRow);
+    let totalForms = document.getElementById('id_' + prefix + '-TOTAL_FORMS');
+    if (totalForms) {
+      totalForms.value = formIdx + 1;
+    }
+    let row = document.querySelectorAll('.saleitem-row')[formIdx];
+    attachRemoveEvents();
+    attachProductBatchEvents(row);
+    stylePriceInputs();
+    recalcTotals();
+    logFormset();
+  });
+
+  // Update commission field when employee changes
+  const employeeSelect = document.getElementById('id_employee');
+  const commissionInput = document.getElementById('id_commission');
+  if (employeeSelect && commissionInput) {
+    employeeSelect.addEventListener('change', function() {
+      let empId = this.value;
+      if (!empId) {
+        commissionInput.value = 0;
+        return;
+      }
+      fetch("{% url 'panel:get_employee_commission' %}?id=" + empId)
+        .then(response => response.json())
+        .then(data => {
+          commissionInput.value = data.commission_percentage;
+        });
+    });
+  }
+
+  // Helper to add readonly and bg-light classes to price fields
+  function stylePriceInputs() {
+    document.querySelectorAll('input[name$="price"]').forEach(function(input) {
+      input.setAttribute('readonly', 'readonly');
+      input.setAttribute('tabindex', '-1');
+      input.classList.add('bg-light');
+    });
+  }
+
+  // Style price fields on page load
+  stylePriceInputs();
+  recalcTotals();
+  logFormset();
+
+  // --- Begin: Sale form front-end validation ---
+  document.getElementById('sale-form').addEventListener('submit', function(e) {
+    let errors = [];
+    // Validate client
+    const client = document.getElementById('id_client');
+    if (!client || !client.value) {
+      errors.push('يرجى اختيار العميل.');
+    }
+    // Validate employee
+    const employee = document.getElementById('id_employee');
+    if (!employee || !employee.value) {
+      errors.push('يرجى اختيار المندوب.');
+    }
+    // Validate commission
+    
+    // Validate sale items
+    let hasItem = false;
+    document.querySelectorAll('.saleitem-row').forEach(function(row, idx) {
+      // Skip deleted rows
+      let delInput = row.querySelector('input[type="checkbox"][name$="DELETE"]');
+      if (delInput && delInput.checked) return;
+      hasItem = true;
+      // Product
+      let product = row.querySelector('.product-select');
+      if (!product || !product.value) {
+        errors.push('يرجى اختيار المنتج في الصف رقم ' + (idx+1));
+      }
+      // Batch
+      let batch = row.querySelector('.batch-select');
+      if (!batch || !batch.value) {
+        errors.push('يرجى اختيار الدفعة في الصف رقم ' + (idx+1));
+      }
+      // Quantity
+      let qty = row.querySelector('input[name$="quantity"]');
+      if (!qty || qty.value === '' || isNaN(qty.value) || Number(qty.value) <= 0) {
+        errors.push('يرجى إدخال كمية صحيحة في الصف رقم ' + (idx+1));
+      }
+      // Price (no longer editable, but still check)
+      let price = row.querySelector('input[name$="price"]');
+      if (!price || price.value === '' || isNaN(price.value) || Number(price.value) < 0) {
+        errors.push('يرجى إدخال سعر صحيح في الصف رقم ' + (idx+1));
+      }
+    });
+    if (!hasItem) {
+      errors.push('يرجى إضافة منتج واحد على الأقل.');
+    }
+    if (errors.length > 0) {
+      e.preventDefault();
+      alert(errors.join('\n'));
+      return false;
+    }
+    // else: allow submit
+  });
+  // --- End: Sale form front-end validation ---
+
+});
+</script>
+{% endblock %}

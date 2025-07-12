@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4" style="max-width: 900px;">
+  <div class="card shadow mb-4">
+    <div class="card-header bg-info text-white">
+      <h4 class="mb-0">تفاصيل البيع <span class="text-white-50">#{{ sale.pk }}</span></h4>
+    </div>
+    <div class="card-body">
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <p><strong>العميل:</strong>
+            {% if sale.client %}
+              {{ sale.client.name }}
+              {% if sale.client.phone %}<span class="text-muted small">({{ sale.client.phone }})</span>{% endif %}
+            {% else %}
+              <span class="text-muted">-</span>
+            {% endif %}
+          </p>
+          <p><strong>العنوان:</strong>
+            {% if sale.client and sale.client.address %}{{ sale.client.address }}{% else %}<span class="text-muted">-</span>{% endif %}
+            {% if sale.client and sale.client.area %}- {{ sale.client.area.name }}{% endif %}
+          </p>
+        </div>
+        <div class="col-md-6">
+          <p><strong>المندوب:</strong>
+            {% if sale.employee %}{{ sale.employee.name }}{% else %}<span class="text-muted">-</span>{% endif %}
+          </p>
+          <p><strong>تاريخ البيع:</strong> {{ sale.created_at|date:"Y-m-d H:i" }}</p>
+          <p><strong>الإجمالي:</strong>
+            <span class="badge bg-success fs-6">{{ sale.total|floatformat:2|intcomma }} SDG</span>
+          </p>
+          {# Commission details #}
+          {% comment %} {% with commission=sale.commission_set.first %}
+            {% if commission %}
+              <div class="mt-2">
+                <span class="badge bg-primary">
+                  <i class="bi bi-percent"></i>
+                  عمولة المندوب:
+                  <span>
+                    {% if sale.employee and sale.employee.commission_percentage %}
+                      {{ sale.employee.commission_percentage|floatformat:2 }}%
+                    {% else %}
+                      -
+                    {% endif %}
+                  </span>
+                  <span class="ms-2">
+                    ({{ commission.amount|floatformat:2 }} SDG)
+                  </span>
+                </span>
+              </div>
+            {% endif %}
+          {% endwith %} {% endcomment %}
+        </div>
+      </div>
+      <hr>
+      <h5 class="mb-3">العناصر المباعة</h5>
+      <div class="table-responsive">
+        <table class="table table-bordered align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>#</th>
+              <th>المنتج</th>
+              <th>الكمية</th>
+              <th>سعر الوحدة</th>
+              <th>الإجمالي</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in sale.items.all %}
+            <tr>
+              <td>{{ forloop.counter }}</td>
+              <td>{{ item.inventory.product.name }}</td>
+              <td>{{ item.quantity }}</td>
+              <td>{{ item.price|floatformat:2|intcomma }}</td>
+              <td>{{ item.get_total|floatformat:2|intcomma }}</td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="5" class="text-center text-muted py-3">لا توجد عناصر.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr class="table-light">
+              <td colspan="4" class="text-end"><strong>الإجمالي الكلي:</strong></td>
+              <td><strong>{{ sale.total|floatformat:2|intcomma }}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {% if invoice %}
+      <div class="card mt-4">
+        <div class="card-header bg-light">
+          <h6 class="mb-0">الفاتورة</h6>
+        </div>
+        <div class="card-body">
+          <p><strong>الإجمالي:</strong> <span class="text-success">{{ invoice.total|floatformat:2|intcomma }} SDG</span></p>
+          <p><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d" }}</p>
+          <p>
+            <strong>المدفوع:</strong>
+            <span class="text-success">{{ invoice.paid_amount|floatformat:"2"|intcomma }} SDG</span>
+            <span class="mx-2"></span>
+            <strong>المتبقي:</strong>
+            <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
+              {{ invoice.remaining_amount|floatformat:"2"|intcomma|intcomma }} SDG
+            </span>
+          </p>
+          <p><strong>الحالة:</strong>
+            {% if invoice.status == 'paid' %}
+              <span class="badge bg-success">مدفوعة</span>
+            {% elif invoice.status == 'partial' %}
+              <span class="badge bg-warning text-dark">مدفوعة جزئياً</span>
+            {% else %}
+              <span class="badge bg-danger">غير مدفوعة</span>
+            {% endif %}
+          </p>
+          {% if invoice.file_path %}
+            <p><a href="{{ invoice.file_path }}" target="_blank" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> تحميل الفاتورة</a></p>
+          {% endif %}
+          {% if invoice.payments.exists %}
+            <div class="mt-4">
+              <h6>سجل الدفعات</h6>
+              <table class="table table-sm table-bordered">
+                <thead>
+                  <tr>
+                    <th>التاريخ</th>
+                    <th>المبلغ</th>
+                    <th>ملاحظة</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in invoice.payments.all %}
+                  <tr>
+                    <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
+                    <td>{{ p.note|default:"-" }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+          {% if invoice.status != 'paid' %}
+            <div class="mt-4">
+              <h6>إضافة دفعة جديدة</h6>
+              <form method="post" action="{% url 'panel:invoice_add_payment' invoice.pk %}">
+                {% csrf_token %}
+                <div class="row g-2 align-items-end">
+                  <div class="col-md-4">
+                    <input type="number" name="amount" class="form-control" min="1" max="{{ invoice.remaining_amount }}" step="0.01" required placeholder="المبلغ">
+                  </div>
+                  <div class="col-md-5">
+                    <input type="text" name="note" class="form-control" placeholder="ملاحظة (اختياري)">
+                  </div>
+                  <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary">إضافة دفعة</button>
+                  </div>
+                </div>
+              </form>
+              <form method="post" action="{% url 'panel:invoice_mark_paid' invoice.pk %}" class="mt-2">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-success">تحديد كمدفوعة</button>
+              </form>
+            </div>
+          {% endif %}
+          <div class="mt-4">
+            <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" target="_blank">
+              تحميل PDF
+            </a>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <div class="alert alert-warning mt-4">لا توجد فاتورة مرتبطة بهذا البيع.</div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="text-center">
+    <a href="{% url 'panel:sale_list' %}" class="btn btn-secondary mt-2"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+  </div>
+</div>
+{% endblock %}

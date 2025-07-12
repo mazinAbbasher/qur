@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>تفاصيل البيع</h1>
+<p><strong>العميل:</strong> {{ sale.client }}</p>
+<p><strong>المندوب:</strong> {{ sale.employee }}</p>
+<p><strong>التاريخ:</strong> {{ sale.created_at }}</p>
+<p><strong>الإجمالي:</strong> {{ sale.total }}</p>
+
+<h2>العناصر</h2>
+<table>
+    <thead>
+        <tr>
+            <th>المنتج</th>
+            <th>الكمية</th>
+            <th>السعر</th>
+            <th>الإجمالي</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in sale.items.all %}
+        <tr>
+            <td>{{ item.product }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.price }}</td>
+            <td>{{ item.get_total }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if invoice %}
+<h2>الفاتورة</h2>
+<p><strong>الإجمالي:</strong> {{ invoice.total }}</p>
+<p><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date }}</p>
+<p><strong>الحالة:</strong> {{ invoice.get_status_display }}</p>
+{% else %}
+<p>لا توجد فاتورة مرتبطة بهذا البيع.</p>
+{% endif %}
+{% endblock %}

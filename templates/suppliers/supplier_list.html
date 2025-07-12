@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+{%load humanize%}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0">قائمة الموردين</h4>
+    <a href="{% url 'panel:supplier_add' %}" class="btn btn-success">إضافة مورد جديد</a>
+  </div>
+  {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+  <div class="card shadow">
+    <div class="card-body p-0">
+      <table class="table table-bordered mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>#</th>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>العنوان</th>
+            <th>الرصيد</th>
+            <th>خيارات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for supplier in suppliers %}
+          <tr>
+            <td>{{ forloop.counter }}</td>
+            <td>{{ supplier.name }}</td>
+            <td>{{ supplier.phone|default:"-" }}</td>
+            <td>{{ supplier.address|default:"-" }}</td>
+            <td>
+              <span class="{% if supplier.balance > 0 %}text-danger{% else %}text-success{% endif %}">
+                {{ supplier.balance|floatformat:2|intcomma }} SDG
+              </span>
+            </td>
+            <td>
+              <a href="{% url 'panel:supplier_detail' supplier.pk %}" class="btn btn-sm btn-info">تفاصيل</a>
+              <a href="{% url 'panel:supplier_edit' supplier.pk %}" class="btn btn-sm btn-warning">تعديل</a>
+              <a href="{% url 'panel:supplier_delete' supplier.pk %}" class="btn btn-sm btn-danger">حذف</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-muted">لا يوجد موردون.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
