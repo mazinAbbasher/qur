@@ -12,12 +12,53 @@
           </a>
         </div>
         <div class="card-body">
-          <!-- Search form for invoice number -->
-          <form method="get" class="mb-3 d-flex align-items-center" style="max-width: 350px;">
-            <input type="text" name="invoice_number" class="form-control me-2" placeholder="بحث برقم الفاتورة" value="{{ invoice_number|default_if_none:'' }}">
+          <!-- Filter form -->
+          <form method="get" class="row g-2 mb-3 align-items-end">
             <div class="col-md-2">
-              <button type="submit" class="btn btn-primary">بحث</button>
-            </div>          </form>
+              <label class="form-label mb-1">المنطقة</label>
+              <select name="area" class="form-select" onchange="this.form.submit()">
+                <option value="">كل المناطق</option>
+                {% for area in areas %}
+                  <option value="{{ area.id }}" {% if area.id == selected_area %}selected{% endif %}>{{ area.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label mb-1">الحالة</label>
+              <select name="status" class="form-select" onchange="this.form.submit()">
+                <option value="">كل الحالات</option>
+                <option value="partial_or_unpaid" {% if selected_status == 'partial_or_unpaid' %}selected{% endif %}>مدفوعة جزئياً أو غير مدفوعة</option>
+                {% for value, label in status_choices %}
+                  <option value="{{ value }}" {% if value == selected_status %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label mb-1">المندوب</label>
+              <select name="employee" class="form-select" onchange="this.form.submit()">
+                <option value="">كل المندوبين</option>
+                {% for emp in employees %}
+                  <option value="{{ emp.id }}" {% if emp.id == selected_employee %}selected{% endif %}>{{ emp.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label mb-1">العميل</label>
+              <select name="client" class="form-select" onchange="this.form.submit()">
+                <option value="">كل العملاء</option>
+                {% for client in clients %}
+                  <option value="{{ client.id }}" {% if client.id == selected_client %}selected{% endif %}>{{ client.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2">
+              <label class="form-label mb-1">رقم الفاتورة</label>
+              <input type="text" name="invoice_number" class="form-control" placeholder="بحث برقم الفاتورة" value="{{ invoice_number|default_if_none:'' }}">
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-primary w-100">تصفية</button>
+            </div>
+          </form>
           <div class="table-responsive">
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gray-100">
@@ -27,8 +68,8 @@
                   <th class="px-4 py-2 text-right font-bold">المندوب</th>
                   <th class="px-4 py-2 text-right font-bold">التاريخ</th>
                   <th class="px-4 py-2 text-right font-bold">الإجمالي</th>
-                  <th class="px-4 py-2 text-right font-bold">المدفوع</th>
-                  <th class="px-4 py-2 text-right font-bold">المتبقي</th>
+                  {% comment %} <th class="px-4 py-2 text-right font-bold">المدفوع</th>
+                  <th class="px-4 py-2 text-right font-bold">المتبقي</th> {% endcomment %}
                   <th class="px-4 py-2 text-right font-bold">الحالة</th>
                   <th class="px-4 py-2 text-right font-bold">تفاصيل</th>
                 </tr>
@@ -57,7 +98,7 @@
                   <td class="px-4 py-2">{{ sale.created_at|date:"Y-m-d H:i" }}</td>
                   <td class="px-4 py-2"><span class="text-success fw-bold">{{ sale.total|floatformat:2|intcomma }}</span></td>
                   {% with invoice=sale.invoice %}
-                  <td class="px-4 py-2">
+                  {% comment %} <td class="px-4 py-2">
                     {% if invoice %}
                       <span class="text-success fw-bold">{{ invoice.paid_amount|floatformat:2|intcomma }}</span>
                     {% else %}
@@ -72,7 +113,7 @@
                     {% else %}
                       <span class="text-muted">-</span>
                     {% endif %}
-                  </td>
+                  </td> {% endcomment %}
                   <td class="px-4 py-2">
                     {% if invoice %}
                       <span class="badge 

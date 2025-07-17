@@ -67,6 +67,9 @@ urlpatterns = [
     path('inventory/', views.inventory_list, name='inventory_list'),
     # Removed add/edit/delete inventory URLs
 
+    path('lost-products/', views.lost_product_list, name='lost_product_list'),
+    path('lost-products/add/', views.lost_product_add, name='lost_product_add'),
+
     path('invoices/', views.invoice_list, name='invoice_list'),
 
     #  path('', views.invoice_list, name='invoice_list'),

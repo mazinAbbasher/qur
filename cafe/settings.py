@@ -130,3 +130,12 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 CRISPY_ALLOWED_TEMPLATE_PACKS = "tailwind"
 CRISPY_TEMPLATE_PACK = "tailwind"
+
+# Set default date input format
+DATE_INPUT_FORMATS = ['%d/%m/%Y']
+
+# Set display format for templates
+DATE_FORMAT = 'd/m/Y'
+
+# Make sure Django doesn't use localization that overrides it
+USE_L10N = False

@@ -131,7 +131,7 @@ class Supplier(models.Model):
     def total_shipments_amount(self):
         # Total owed to supplier (sum of shipment cost + purchase cost for all shipments)
         return sum(
-            (s.cost_sdg or 0) * (s.quantity or 0)
+            (s.cost_usd or 0) * (s.quantity or 0)
             for s in self.shipments.all()
         )
 
@@ -212,6 +212,25 @@ class Inventory(models.Model):
     def __str__(self):
         return f"{self.product.name} - Batch {self.shipment.batch_number} (Exp: {self.shipment.expiry_date})"
 
+class LostProduct(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='lost_products')
+    inventory = models.ForeignKey(Inventory, on_delete=models.CASCADE, related_name='lost_products')
+    quantity = models.PositiveIntegerField()
+    note = models.CharField(max_length=255, blank=True, null=True)
+    lost_at = models.DateTimeField(default=timezone.now)
+
+    def save(self, *args, **kwargs):
+        # Deduct from inventory only on creation
+        if not self.pk:
+            if self.quantity > self.inventory.quantity:
+                raise ValueError("Lost quantity exceeds available inventory.")
+            self.inventory.quantity -= self.quantity
+            self.inventory.save()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Lost {self.quantity} of {self.product.name} (Batch {self.inventory.shipment.batch_number})"
+
 class Sale(models.Model):
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True)
     employee = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
@@ -232,10 +251,31 @@ class SaleItem(models.Model):
     inventory = models.ForeignKey('Inventory', on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    free_goods_discount = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # percent
+    price_discount = models.DecimalField(max_digits=5, decimal_places=2, default=0)      # percent
+
+    @property
+    def free_units(self):
+        # Number of free units based on free_goods_discount
+        from math import floor
+        return floor(self.quantity * float(self.free_goods_discount) / 100)
+
+    @property
+    def discounted_unit_price(self):
+        # Price after price_discount
+        if self.price_discount > 0:
+            return float(self.price) / (1 + float(self.price_discount) / 100)
+        return float(self.price)
 
     @property
     def get_total(self):
-        return self.price * self.quantity
+        # Total price after price discount, only for paid units (not free)
+        return self.discounted_unit_price * self.quantity
+
+    @property
+    def total_units(self):
+        # Total units delivered (paid + free)
+        return self.quantity + self.free_units
 
     def __str__(self):
         return f"{self.quantity} x {self.inventory.product.name} (Batch {self.inventory.shipment.batch_number})"

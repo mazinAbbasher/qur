@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load humanize %}
 {% block content %}
-<div class="container py-4" style="max-width: 900px;">
+<div class="container py-4">
   <div class="card shadow mb-4">
     <div class="card-header bg-info text-white">
-      <h4 class="mb-0">تفاصيل البيع <span class="text-white-50">#{{ sale.pk }}</span></h4>
+      <h4 class="mb-0 text-white">تفاصيل البيع <span class="text-white-50">#{{ sale.pk }}</span></h4>
     </div>
     <div class="card-body">
       <div class="row mb-3">
@@ -30,27 +30,6 @@
           <p><strong>الإجمالي:</strong>
             <span class="badge bg-success fs-6">{{ sale.total|floatformat:2|intcomma }} SDG</span>
           </p>
-          {# Commission details #}
-          {% comment %} {% with commission=sale.commission_set.first %}
-            {% if commission %}
-              <div class="mt-2">
-                <span class="badge bg-primary">
-                  <i class="bi bi-percent"></i>
-                  عمولة المندوب:
-                  <span>
-                    {% if sale.employee and sale.employee.commission_percentage %}
-                      {{ sale.employee.commission_percentage|floatformat:2 }}%
-                    {% else %}
-                      -
-                    {% endif %}
-                  </span>
-                  <span class="ms-2">
-                    ({{ commission.amount|floatformat:2 }} SDG)
-                  </span>
-                </span>
-              </div>
-            {% endif %}
-          {% endwith %} {% endcomment %}
         </div>
       </div>
       <hr>
@@ -64,6 +43,7 @@
               <th>الكمية</th>
               <th>سعر الوحدة</th>
               <th>الإجمالي</th>
+              <th>الخصومات</th>
             </tr>
           </thead>
           <tbody>
@@ -71,19 +51,43 @@
             <tr>
               <td>{{ forloop.counter }}</td>
               <td>{{ item.inventory.product.name }}</td>
-              <td>{{ item.quantity }}</td>
-              <td>{{ item.price|floatformat:2|intcomma }}</td>
+              <td>
+                {{ item.quantity }}
+                {% if item.free_goods_discount > 0 %}
+                  <span class="badge bg-info text-white ms-1">+{{ item.free_units }} مجاني</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if item.price_discount > 0 %}
+                  <span class="text-decoration-line-through text-danger">{{ item.price|floatformat:2|intcomma }}</span>
+                  <span class="text-success fw-bold">{{ item.discounted_unit_price|floatformat:2|intcomma }}</span>
+                {% else %}
+                  {{ item.price|floatformat:2|intcomma }}
+                {% endif %}
+              </td>
               <td>{{ item.get_total|floatformat:2|intcomma }}</td>
+              <td>
+                {% if item.free_goods_discount > 0 or item.price_discount > 0 %}
+                  {% if item.free_goods_discount > 0 %}
+                    <div>بضاعة مجانية: {{ item.free_goods_discount|floatformat:2 }}%</div>
+                  {% endif %}
+                  {% if item.price_discount > 0 %}
+                    <div>خصم سعر: {{ item.price_discount|floatformat:2 }}%</div>
+                  {% endif %}
+                {% else %}
+                  <span class="text-muted">-</span>
+                {% endif %}
+              </td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="5" class="text-center text-muted py-3">لا توجد عناصر.</td>
+              <td colspan="6" class="text-center text-muted py-3">لا توجد عناصر.</td>
             </tr>
             {% endfor %}
           </tbody>
           <tfoot>
             <tr class="table-light">
-              <td colspan="4" class="text-end"><strong>الإجمالي الكلي:</strong></td>
+              <td colspan="5" class="text-end"><strong>الإجمالي الكلي:</strong></td>
               <td><strong>{{ sale.total|floatformat:2|intcomma }}</strong></td>
             </tr>
           </tfoot>

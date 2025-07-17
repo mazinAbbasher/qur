@@ -27,16 +27,16 @@
           <p><strong>ملاحظات:</strong> {{ supplier.note|default:"-" }}</p>
           <p>
             <strong>إجمالي الشحنات:</strong>
-            <span class="text-primary">{{ supplier.total_shipments_amount|floatformat:2|intcomma }}</span>
+            <span class="text-primary">{{ supplier.total_shipments_amount|floatformat:2|intcomma }}  دولار</span>
           </p>
           <p>
             <strong>إجمالي المدفوع:</strong>
-            <span class="text-success">{{ supplier.total_paid|floatformat:2|intcomma }}</span>
+            <span class="text-success">{{ supplier.total_paid|floatformat:2|intcomma }}  دولار</span>
           </p>
           <p>
             <strong>الرصيد المتبقي:</strong>
             <span class="{% if supplier.balance > 0 %}text-danger{% else %}text-success{% endif %} fw-bold">
-              {{ supplier.balance|floatformat:2|intcomma }}
+              {{ supplier.balance|floatformat:2|intcomma }} دولار
             </span>
           </p>
         </div>
@@ -50,8 +50,8 @@
               <th>#</th>
               <th>المنتج</th>
               <th>الكمية</th>
-              <th>تكلفة الوحدة (جنيه)</th>
-              <th>تكلفة الشحن</th>
+              <th>تكلفة الوحدة (دولار)</th>
+              {% comment %} <th>تكلفة الشحن</th> {% endcomment %}
               <th>تاريخ الاستلام</th>
               <th>رقم التشغيلة</th>
               <th>تاريخ الانتهاء</th>
@@ -63,8 +63,8 @@
               <td>{{ forloop.counter }}</td>
               <td>{{ s.product.name }}</td>
               <td>{{ s.quantity }}</td>
-              <td>{{ s.cost_sdg|floatformat:2|intcomma }}</td>
-              <td>{{ s.shipment_cost|floatformat:2|intcomma }}</td>
+              <td>{{ s.cost_usd|floatformat:2|intcomma }}</td>
+              {% comment %} <td>{{ s.shipment_cost|floatformat:2|intcomma }}</td> {% endcomment %}
               <td>{{ s.received_at|date:"Y-m-d" }}</td>
               <td>{{ s.batch_number }}</td>
               <td>{{ s.expiry_date|date:"Y-m-d" }}</td>
@@ -84,7 +84,7 @@
             <tr>
               <th>#</th>
               <th>التاريخ</th>
-              <th>المبلغ</th>
+              <th>المبلغ بالدولار</th>
               <th>ملاحظة</th>
             </tr>
           </thead>
@@ -108,8 +108,8 @@
       <form method="post" action="{% url 'panel:supplier_add_payment' supplier.pk %}" class="row g-2 align-items-end">
         {% csrf_token %}
         <div class="col-md-4">
-          <input type="number" name="amount" class="form-control" min="1" max="{{ supplier.remaining_amount }}" step="0.01" required placeholder="المبلغ">
-          <small class="text-muted">المتبقي للمورد: {{ supplier.remaining_amount|floatformat:2|intcomma }}</small>
+          <input type="number" name="amount" class="form-control" min="1" max="{{ supplier.remaining_amount }}" step="0.01" required placeholder="المبلغ بالدولار">
+          <small class="text-muted">المتبقي للمورد: {{ supplier.remaining_amount|floatformat:2|intcomma }} دولار</small>
         </div>
         <div class="col-md-5">
           {{ payment_form.note }}

@@ -4,7 +4,7 @@
 {% block content %}
 <div class="container py-4">
   <div class="row justify-content-center">
-    <div class="col-lg-10 col-md-12">
+    <div class="col-md-12">
       <div class="card shadow">
         <div class="card-header bg-info text-white">
           <h5 class="mb-0 text-white">
@@ -44,6 +44,8 @@
                         <th class="text-center">تاريخ الانتهاء</th>
                         <th class="text-center">الكمية <span class="text-danger">*</span></th>
                         <th class="text-center">السعر <span class="text-danger">*</span></th>
+                        <th class="text-center">بضاعة مجانية</th>
+                        <th class="text-center">خصم سعر</th>
                         <th class="text-center">الإجمالي</th>
                         <th class="text-center"></th>
                       </tr>
@@ -96,6 +98,12 @@
                             {{ form.price }}
                             <span class="input-group-text">جنيه</span>
                           </div>
+                        </td>
+                        <td>
+                          {{ form.free_goods_discount }}
+                        </td>
+                        <td>
+                          {{ form.price_discount }}
                         </td>
                         <td class="item-total text-success fw-bold text-center">
                           {% if form.instance.pk %}
@@ -197,9 +205,22 @@ document.addEventListener('DOMContentLoaded', function() {
       if (delInput && delInput.checked) return;
       let qtyInput = row.querySelector('input[name$="quantity"]');
       let priceInput = row.querySelector('input[name$="price"]');
+      let priceDiscountInput = row.querySelector('input[name$="price_discount"]');
       let qty = qtyInput ? parseFloat(qtyInput.value) || 0 : 0;
       let price = priceInput ? parseFloat(priceInput.value) || 0 : 0;
-      let itemTotal = qty * price;
+      let priceDiscount = priceDiscountInput ? parseFloat(priceDiscountInput.value) || 0 : 0;
+
+      // Free goods discount does not affect price or total
+      // Price discount: price / (1 + discount%)
+      let effectivePrice = price;
+      if (priceDiscount > 0) {
+        effectivePrice = price / (1 + (priceDiscount / 100));
+      }
+      let itemTotal = qty * effectivePrice;
+
+      // Ensure non-negative
+      itemTotal = Math.max(0, itemTotal);
+
       row.querySelector('.item-total').textContent = itemTotal.toFixed(2);
       total += itemTotal;
     });
@@ -226,7 +247,30 @@ document.addEventListener('DOMContentLoaded', function() {
   const saleitemsTable = document.getElementById('saleitems-table');
   if (saleitemsTable) {
     saleitemsTable.addEventListener('input', function(e) {
-      if (e.target.name && (e.target.name.endsWith('quantity') || e.target.name.endsWith('price'))) {
+      if (
+        e.target.name &&
+        (
+          e.target.name.endsWith('quantity') ||
+          e.target.name.endsWith('price') ||
+          e.target.name.endsWith('free_goods_discount') ||
+          e.target.name.endsWith('price_discount')
+        )
+      ) {
+        recalcTotals();
+        logFormset();
+      }
+    });
+    // Also recalc on change (for select fields)
+    saleitemsTable.addEventListener('change', function(e) {
+      if (
+        e.target.name &&
+        (
+          e.target.name.endsWith('quantity') ||
+          e.target.name.endsWith('price') ||
+          e.target.name.endsWith('free_goods_discount') ||
+          e.target.name.endsWith('price_discount')
+        )
+      ) {
         recalcTotals();
         logFormset();
       }
@@ -435,6 +479,8 @@ document.addEventListener('DOMContentLoaded', function() {
         <td>
           <input type="number" name="${prefix}-${formIdx}-price" class="form-control bg-light" value="${parseFloat(priceVal).toFixed(2)}" step="0.01" readonly tabindex="-1">
         </td>
+        <td><input type="number" name="${prefix}-${formIdx}-free_goods_discount" class="form-control" value="0" min="0" max="100"></td>
+        <td><input type="number" name="${prefix}-${formIdx}-price_discount" class="form-control" value="0" min="0" max="100"></td>
         <td class="item-total">0</td>
         <td>
           <button type="button" class="btn btn-danger btn-sm remove-saleitem">حذف</button>
@@ -527,6 +573,16 @@ document.addEventListener('DOMContentLoaded', function() {
       let price = row.querySelector('input[name$="price"]');
       if (!price || price.value === '' || isNaN(price.value) || Number(price.value) < 0) {
         errors.push('يرجى إدخال سعر صحيح في الصف رقم ' + (idx+1));
+      }
+      // Free goods discount
+      let freeGoodsDiscount = row.querySelector('input[name$="free_goods_discount"]');
+      if (!freeGoodsDiscount || freeGoodsDiscount.value === '' || isNaN(freeGoodsDiscount.value) || Number(freeGoodsDiscount.value) < 0 || Number(freeGoodsDiscount.value) > 100) {
+        errors.push('يرجى إدخال خصم بضاعة مجانية صحيح في الصف رقم ' + (idx+1));
+      }
+      // Price discount
+      let priceDiscount = row.querySelector('input[name$="price_discount"]');
+      if (!priceDiscount || priceDiscount.value === '' || isNaN(priceDiscount.value) || Number(priceDiscount.value) < 0 || Number(priceDiscount.value) > 100) {
+        errors.push('يرجى إدخال خصم سعر صحيح في الصف رقم ' + (idx+1));
       }
     });
     if (!hasItem) {

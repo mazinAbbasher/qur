@@ -1,138 +1,311 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
-    <title>فاتورة رقم {{ invoice.number }}</title>
+    <title>Invoice #{{ invoice.number }}</title>
     <style>
-        body { font-family: 'Cairo', Arial, sans-serif; direction: rtl; }
-        .header { background: #007bff; color: #fff; padding: 12px; margin-bottom: 16px; border-radius: 8px 8px 0 0; }
-        .company-info { margin-bottom: 16px; }
-        .company-logo { float: left; width: 80px; height: 80px; object-fit: contain; margin-left: 16px; }
-        .badge { padding: 4px 12px; border-radius: 4px; font-size: 1em; }
-        .bg-success { background: #28a745 !important; color: #fff !important; }
-        .bg-danger { background: #dc3545 !important; color: #fff !important; }
-        .bg-warning { background: #ffc107 !important; color: #333 !important; }
-        .meta-table { width: 100%; margin-bottom: 18px; border-collapse: collapse; }
-        .meta-table td { padding: 4px 8px; }
-        .table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-        .table th, .table td { border: 1px solid #333; padding: 8px; text-align: center; }
-        .table th { background: #f2f2f2; }
-        .footer { margin-top: 32px; font-size: 0.95em; color: #888; text-align: center; }
-        .signature { margin-top: 48px; text-align: left; }
-        .watermark {
-            position: fixed;
-            top: 40%;
-            left: 25%;
-            font-size: 4em;
-            color: #dc354580;
-            transform: rotate(-20deg);
-            z-index: 0;
-            pointer-events: none;
+        body {
+            font-family: Arial, sans-serif;
+            color: #222;
+            background: #fff;
+            margin: 0;
+            padding: 0;
         }
-        .amounts-row td { font-size: 1.1em; }
+        .invoice-container {
+            max-width: 700px;
+            margin: 40px auto;
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 0 0 24px 0;
+        }
+        .my-header {
+            padding: 32px 32px 16px 32px;
+            border-bottom: 1px solid #bbb;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+        .company-logo {
+            height: 70px;
+            width: auto;
+            object-fit: contain;
+            margin-right: 24px;
+        }
+        .company-details {
+            flex: 1;
+        }
+        .company-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            {% comment %} margin-bottom: 0.2em; {% endcomment %}
+            margin-top: 1.1em;
+        }
+        .invoice-title {
+            font-size: 1em;
+            font-weight: bold;
+            margin-bottom: 0.2em;
+            margin-top: 0.6em;
+
+        }
+        .meta-section {
+            display: flex;
+            gap: 40px;
+            padding: 24px 32px 0 32px;
+            flex-wrap: wrap;
+        }
+        .meta-block {
+            margin-bottom: 8px;
+            min-width: 160px;
+        }
+        .meta-block strong {
+            display: block;
+            font-size: 1em;
+            margin-bottom: 2px;
+        }
+        .amounts-row {
+            display: flex;
+            gap: 16px;
+            margin: 18px 32px 0 32px;
+        }
+        .amount-card {
+            background: none;
+            border: none;
+            padding: 0;
+            flex: 1;
+            text-align: left;
+        }
+        .amount-card strong {
+            display: block;
+            font-size: 1em;
+            color: #555;
+            margin-bottom: 2px;
+        }
+        .amount-card .amount {
+            font-size: 1.08em;
+            font-weight: bold;
+        }
+        .section-title {
+            font-size: 1em;
+            font-weight: bold;
+            margin: 28px 32px 8px 32px;
+            border-left: 2px solid #bbb;
+            padding-left: 8px;
+        }
+        .table-container {
+            margin: 0 32px;
+            border-radius: 0;
+            overflow: visible;
+            border: none;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            margin-bottom: 0;
+        }
+        th, td {
+            padding: 8px 4px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            font-size: 1em;
+        }
+        th {
+            background: none;
+            font-weight: bold;
+            border-bottom: 2px solid #bbb;
+        }
+        td:last-child, th:last-child {
+            text-align: right;
+        }
+        tfoot th {
+            background: none;
+            font-size: 1em;
+            color: #222;
+            border-bottom: none;
+            font-weight: bold;
+            text-align: right;
+        }
+        .discounts-list {
+            margin: 0.5em 0 0 0;
+            padding: 0;
+            list-style: none;
+            color: #555;
+            font-size: 0.98em;
+        }
+        .discounts-list li {
+            margin-bottom: 2px;
+        }
+        .footer {
+            margin-top: 36px;
+            font-size: 0.95em;
+            color: #888;
+            text-align: center;
+            padding: 18px 0 0 0;
+            border-top: 1px solid #bbb;
+            background: #fff;
+        }
+        .signature {
+            margin: 36px 32px 0 32px;
+            text-align: left;
+            font-size: 1em;
+            color: #222;
+        }
+        th.free-units-col, td.free-units-col {
+            {% comment %} text-align: right; {% endcomment %}
+            color:rgb(95, 190, 5);
+            font-size: 0.98em;
+        }
+        @media (max-width: 700px) {
+            .invoice-container, .my-header, .meta-section, .amounts-row, .section-title, .table-container {
+                padding-left: 8px !important;
+                padding-right: 8px !important;
+            }
+            .my-header { flex-direction: column; align-items: flex-start; }
+            .meta-section { flex-direction: column; }
+            .amounts-row { flex-direction: column; gap: 8px; }
+            .section-title { margin-left: 8px; margin-right: 8px; }
+            .signature { margin-left: 8px; margin-right: 8px; }
+        }
     </style>
 </head>
 <body>
-   
-    <table class="meta-table">
-        <tr>
-            <td><strong>رقم الفاتورة:</strong> {{ invoice.number }}</td>
-            <td><strong>الحالة:</strong>
-                <span class="badge"
-                    {% comment %} {% if invoice.status == 'paid' %}bg-success
-                    {% elif invoice.status == 'partial' %}bg-warning
-                    {% else %}bg-danger{% endif %}"> {% endcomment %}
-                    >
-                    {% if invoice.status == 'paid' %}مدفوعة
-                    {% elif invoice.status == 'partial' %}مدفوعة جزئياً
-                    {% else %}غير مدفوعة{% endif %}
-                </span>
-            </td>
-        </tr>
-        <tr>
-            <td><strong>تاريخ الفاتورة:</strong> {{ invoice.created_at|date:"Y-m-d H:i" }}</td>
-            <td><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d" }}</td>
-        </tr>
-        <tr class="amounts-row">
-            <td>
-                <strong>المدفوع:</strong>
-                <span style="color:#28a745;font-weight:bold;">{{ invoice.paid_amount|floatformat:"2" }} SDG</span>
-            </td>
-            <td>
-                <strong>المتبقي:</strong>
-                <span style="color:{% if invoice.remaining_amount > 0 %}#dc3545{% else %}#28a745{% endif %};font-weight:bold;">
-                    {{ invoice.remaining_amount|floatformat:"2" }} SDG
-                </span>
-            </td>
-        </tr>
-    </table>
-    <div class="company-info">
-        <strong>العميل:</strong> {{ invoice.sale.client.name }}<br>
-        {% comment %} <strong>الهاتف:</strong> {{ invoice.sale.client.phone|default:"-" }}<br>
-        <strong>العنوان:</strong> {{ invoice.sale.client.address|default:"-" }}<br>
-        <strong>المنطقة:</strong> {{ invoice.sale.client.area|default:"-" }} {% endcomment %}
-    </div>
-    <h4 style="margin-top:24px;">تفاصيل المنتجات</h4>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>المنتج</th>
-                {% comment %} <th>الدفعة</th>
-                <th>تاريخ الانتهاء</th> {% endcomment %}
-                <th>الكمية</th>
-                <th>السعر</th>
-                <th>الإجمالي</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in invoice.sale.items.all %}
-            <tr>
-                <td>{{ item.inventory.product.name }}</td>
-                {% comment %} <td>{{ item.inventory.batch_number }}</td>
-                <td>{{ item.inventory.expiry_date }}</td> {% endcomment %}
-                <td>{{ item.quantity }}</td>
-                <td>{{ item.price|floatformat:"2" }}</td>
-                <td>{{ item.get_total|floatformat:"2" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-        <tfoot>
-            <tr>
-                <th colspan="3" style="text-align:right;">الإجمالي الكلي</th>
-                <th>{{ invoice.total|floatformat:"2" }}</th>
-            </tr>
-        </tfoot>
-    </table>
-    {% if invoice.payments.exists %}
-    <h4 style="margin-top:32px;">سجل الدفعات</h4>
-    <table class="table">
-        <thead>
-            <tr>
-                <th>التاريخ</th>
-                <th>المبلغ</th>
-                <th>ملاحظة</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for p in invoice.payments.all %}
-            <tr>
-                <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
-                <td>{{ p.amount|floatformat:"2" }}</td>
-                <td>{{ p.note|default:"-" }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% endif %}
-    <div class="signature">
-        {% comment %} <div>
-            <strong>توقيع المسؤول:</strong>
-            <span style="display:inline-block; border-bottom:1px solid #888; width:200px; height:24px;"></span>
-        </div> {% endcomment %}
-    </div>
-    <div class="footer">
-        <span>جميع الحقوق محفوظة &copy; Equatorial medical LTD{{ invoice.created_at|date:"Y" }}</span>
+    <div class="invoice-container">
+        <div class="my-header">
+            <img src="{% static 'assets/img/logo.png' %}" alt="Company Logo" class="company-logo">
+            <div class="company-details">
+                <div class="company-name">Equatorial Medical LTD</div>
+            </div>
+            <div style="text-align:right;">
+                <div class="invoice-title">Invoice</div>
+                <div>
+                    <strong>#{{ invoice.number }}</strong>
+                </div>
+            </div>
+        </div>
+        <div class="meta-section">
+            <div class="meta-block">
+                <strong>Invoice Date</strong>
+                <span>{{ invoice.created_at|date:"Y-m-d H:i" }}</span>
+            </div>
+            <div class="meta-block">
+                <strong>Client</strong>
+                <span>{{ invoice.sale.client.name }}</span>
+            </div>
+        </div>
+        <div class="amounts-row">
+            <div class="amount-card">
+                <strong>Paid</strong>
+                <span class="amount">{{ invoice.paid_amount|floatformat:"2" }} SDG</span>
+            </div>
+            <div class="amount-card">
+                <strong>Remaining</strong>
+                <span class="amount">{{ invoice.remaining_amount|floatformat:"2" }} SDG</span>
+            </div>
+            <div class="amount-card">
+                <strong>Total</strong>
+                <span class="amount">{{ invoice.total|floatformat:"2" }} SDG</span>
+            </div>
+        </div>
+        <div class="section-title">Products Details</div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Quantity</th>
+                        {% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}
+                        <th class="free-units-col">Free Units</th>
+                        {% endif %}
+                        <th>Unit Price</th>
+                        <th>Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in invoice.sale.items.all %}
+                    <tr>
+                        <td>{{ item.inventory.product.name }}</td>
+                        <td>{{ item.quantity }}</td>
+                        {% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}
+                        <td class="free-units-col">
+                            {% if item.free_goods_discount|floatformat:"2" != "0.00" %}
+                                {{ item.free_units }}
+                            {% else %}
+                                0
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                        <td>
+                            {% if item.price_discount|floatformat:"2" != "0.00" %}
+                                {{ item.discounted_unit_price|floatformat:"2" }}
+                            {% else %}
+                                {{ item.price|floatformat:"2" }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {{ item.get_total|floatformat:"2" }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if has_discount %}
+                <tr>
+                    <th colspan="5" style="text-align:left;">
+                        Discounts Applied:
+                        <ul class="discounts-list">
+                            {% for item in discounted_items %}
+                                <li>
+                                    {{ item.inventory.product.name }}:
+                                    {% if item.free_goods_discount|floatformat:"2" != "0.00" %}
+                                        Free Goods Discount: {{ item.free_goods_discount|floatformat:"2" }}% ({{ item.free_units }} units)
+                                    {% endif %}
+                                    {% if item.price_discount|floatformat:"2" != "0.00" %}
+                                        {% if item.free_goods_discount|floatformat:"2" != "0.00" %} &ndash; {% endif %}
+                                        Price Discount: {{ item.price_discount|floatformat:"2" }}%
+                                    {% endif %}
+                                </li>
+                            {% endfor %}
+                        </ul>
+                    </th>
+                </tr>
+                {% endif %}
+                <tfoot>
+                    <tr>
+                        <th colspan="{% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}4{% else %}3{% endif %}" style="text-align:right;">Grand Total</th>
+                        <th>{{ invoice.total|floatformat:"2" }}</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+        {% if invoice.payments.exists %}
+        <div class="section-title">Payment History</div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Note</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in invoice.payments.all %}
+                    <tr>
+                        <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
+                        <td style="text-align:right;">{{ p.amount|floatformat:"2" }}</td>
+                        <td>{{ p.note|default:"-" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        <div class="signature">
+            Thank you for your business!
+        </div>
+        <div class="footer">
+            &copy; {{ invoice.created_at|date:"Y" }} Equatorial Medical LTD. All rights reserved.
+        </div>
     </div>
 </body>
 </html>

@@ -11,7 +11,7 @@ from datetime import timedelta  # <-- Add this import
 from .models import (
     Expense, Product, Invoice, Sale, SaleItem, Client, Employee,
     ExchangeRate, Area, Shipment, Commission, Inventory, InvoicePayment,
-    Supplier, SupplierPayment  # <-- add Supplier, SupplierPayment
+    Supplier, SupplierPayment, LostProduct  # <-- add LostProduct
 )
 from django import forms
 from django.forms import inlineformset_factory, ModelForm
@@ -312,21 +312,34 @@ def area_sales_report(request):
     })
 
 class SaleItemForm(forms.ModelForm):
+    free_goods_discount = forms.DecimalField(
+        label="خصم بضاعة مجانية (%)", required=False, min_value=0, max_value=100, initial=0,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'})
+    )
+    price_discount = forms.DecimalField(
+        label="خصم سعر (%)", required=False, min_value=0, max_value=100, initial=0,
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'})
+    )
+
     class Meta:
         model = SaleItem
-        fields = ['inventory', 'quantity', 'price']  # price will be set automatically
+        fields = ['inventory', 'quantity', 'price', 'free_goods_discount', 'price_discount']
         labels = {
             'inventory': 'الدفعة',
             'quantity': 'الكمية',
             'price': 'السعر',
+            'free_goods_discount': 'خصم بضاعة مجانية (%)',
+            'price_discount': 'خصم سعر (%)',
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Make price field read-only in the form
         self.fields['price'].widget.attrs['readonly'] = True
         self.fields['price'].widget.attrs['tabindex'] = -1
         self.fields['price'].widget.attrs['class'] = self.fields['price'].widget.attrs.get('class', '') + ' bg-light'
+        # Set default discount values if not set
+        self.fields['free_goods_discount'].initial = self.instance.free_goods_discount or 0
+        self.fields['price_discount'].initial = self.instance.price_discount or 0
 
 SaleItemFormSet = inlineformset_factory(
     Sale, SaleItem, form=SaleItemForm, extra=0, can_delete=True
@@ -373,23 +386,33 @@ def sale_create(request):
             prefix = f'items-{i}'
             product_id = post_data.get(f'{prefix}-product')
             batch_id = post_data.get(f'{prefix}-batch')
+            # --- Get discounts from POST ---
+            free_goods_discount = post_data.get(f'{prefix}-free_goods_discount', 0)
+            price_discount = post_data.get(f'{prefix}-price_discount', 0)
+            post_data[f'{prefix}-free_goods_discount'] = free_goods_discount or 0
+            post_data[f'{prefix}-price_discount'] = price_discount or 0
+            # ...existing code for price...
             if batch_id:
                 post_data[f'{prefix}-inventory'] = batch_id
-            # Set price from shipment.sale_usd * product.exchange_rate for the exact inventory (batch)
             if product_id and batch_id:
                 try:
                     inventory = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
                     shipment = inventory.shipment
                     product = inventory.product
                     if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-                        price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
-                        post_data[f'{prefix}-price'] = price
+                        base_price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                        # --- FIX: Use correct discount formula and ensure string ---
+                        if price_discount and float(price_discount) > 0:
+                            price = base_price * (1 - float(price_discount) / 100)
+                        else:
+                            price = base_price
+                        post_data[f'{prefix}-price'] = str(round(price, 2))
                     else:
-                        post_data[f'{prefix}-price'] = 0
+                        post_data[f'{prefix}-price'] = "0"
                 except (Inventory.DoesNotExist, Product.DoesNotExist, AttributeError):
-                    post_data[f'{prefix}-price'] = 0
+                    post_data[f'{prefix}-price'] = "0"
             else:
-                post_data[f'{prefix}-price'] = 0
+                post_data[f'{prefix}-price'] = "0"
         formset = SaleItemFormSet(post_data)
         if sale_form.is_valid() and formset.is_valid():
             sale = sale_form.save(commit=False)
@@ -440,11 +463,16 @@ def sale_create(request):
                     form.instance.price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
                 else:
                     form.instance.price = 0
+                # --- Set discounts from form data ---
+                form.instance.free_goods_discount = float(form.cleaned_data.get('free_goods_discount') or 0)
+                form.instance.price_discount = float(form.cleaned_data.get('price_discount') or 0)
             for obj in formset.deleted_objects:
                 obj.delete()
             for item in sale_items:
-                if item.quantity > item.inventory.quantity:
-                    messages.error(request, f"الكمية المطلوبة غير متوفرة في الدفعة {item.inventory.shipment.batch_number} للمنتج {item.inventory.product.name}")
+                # Deduct both paid and free units from inventory
+                total_units = item.quantity + item.free_units
+                if total_units > item.inventory.quantity:
+                    messages.error(request, f"الكمية المطلوبة (مع المجاني) غير متوفرة في الدفعة {item.inventory.shipment.batch_number} للمنتج {item.inventory.product.name}")
                     return render(request, 'sales/sale_form.html', {
                         'sale_form': sale_form,
                         'formset': formset,
@@ -456,7 +484,7 @@ def sale_create(request):
                         'sale': None,
                         "active_sidebar": "sales"
                     })
-                item.inventory.quantity -= item.quantity
+                item.inventory.quantity -= total_units
                 item.inventory.save()
                 item.save()
                 total += item.get_total
@@ -484,6 +512,11 @@ def sale_create(request):
             invoice.status = 'unpaid'
             invoice.save()
             return redirect('panel:sale_detail', pk=sale.pk)
+        else:
+            # --- Add this block to print form errors for debugging ---
+            print("SaleForm errors:", sale_form.errors)
+            print("Formset errors:", formset.errors)
+            messages.error(request, "حدث خطأ في البيانات المدخلة. يرجى مراجعة الحقول.")
     else:
         sale_form = SaleForm()
         formset = SaleItemFormSet()
@@ -531,10 +564,45 @@ def sale_list(request):
     if invoice_number:
         sales = sales.filter(invoice__number__icontains=invoice_number)
     # --- End search ---
+
+    # --- New: Filtering ---
+    area_id = request.GET.get('area')
+    status = request.GET.get('status')
+    employee_id = request.GET.get('employee')
+    client_id = request.GET.get('client')
+
+    if area_id:
+        sales = sales.filter(client__area_id=area_id)
+    # --- handle new partial_or_unpaid status ---
+    if status == "partial_or_unpaid":
+        sales = sales.filter(invoice__status__in=["partial", "unpaid"])
+    elif status:
+        sales = sales.filter(invoice__status=status)
+    # --- end handle ---
+    if employee_id:
+        sales = sales.filter(employee_id=employee_id)
+    if client_id:
+        sales = sales.filter(client_id=client_id)
+
+    # For filter dropdowns
+    areas = Area.objects.all()
+    employees = Employee.objects.all()
+    clients = Client.objects.all()
+    status_choices = Invoice.STATUS_CHOICES
+
     return render(request, 'panel/sale_list.html', {
         'sales': sales,
         "active_sidebar": "sales",
         'invoice_number': invoice_number,  # Pass to template for form value
+        # --- New context for filters ---
+        'areas': areas,
+        'employees': employees,
+        'clients': clients,
+        'status_choices': status_choices,
+        'selected_area': int(area_id) if area_id else None,
+        'selected_status': status,
+        'selected_employee': int(employee_id) if employee_id else None,
+        'selected_client': int(client_id) if client_id else None,
     })
 
 def shipment_list(request):
@@ -803,14 +871,22 @@ def employee_list(request):
     # Get month/year from GET params
     month = request.GET.get('month')
     year = request.GET.get('year')
-    if not month:
-        month = today.month
-    else:
+    # --- Ensure valid integer values and fallback ---
+    try:
         month = int(month)
-    if not year:
-        year = today.year
-    else:
+        if not (1 <= month <= 12):
+            month = today.month
+    except (TypeError, ValueError):
+        month = today.month
+    try:
         year = int(year)
+    except (TypeError, ValueError):
+        year = today.year
+    # --- Build years list for dropdown ---
+    first_employee = Employee.objects.order_by('created_at').first()
+    min_year = first_employee.created_at.year if first_employee else today.year
+    max_year = today.year
+    years = list(range(min_year, max_year + 1))
     employees = Employee.objects.all()
     employee_data = []
     for emp in employees:
@@ -829,17 +905,12 @@ def employee_list(request):
             'progress': progress,
             'unpaid_commission': unpaid_commission,
         })
-    # Prepare months for dropdown (last 12 months)
-    from datetime import datetime
-    months = []
-    for i in range(12):
-        d = today.replace(day=1) - timedelta(days=30*i)
-        months.append({'value': d.month, 'label': f"{d.year}-{d.month:02d}"})
-    months = sorted({(m['value'], m['label']) for m in months}, key=lambda x: x[1], reverse=True)
-    months = [{'value': m[0], 'label': m[1]} for m in months]
+    # Prepare months for dropdown (1-12, label as "MM")
+    months = [{'value': m, 'label': f"{m:02d}"} for m in range(1, 13)]
     return render(request, 'panel/employee_list.html', {
         'employee_data': employee_data,
         'months': months,
+        'years': years,
         'selected_month': month,
         'selected_year': year,
         "active_sidebar": "employees"
@@ -1138,7 +1209,7 @@ def invoice_add_payment(request, pk):
     else:
         for error in form.errors.values():
             messages.error(request, error)
-    return redirect('panel:invoice_detail', pk=invoice.pk)
+    return redirect('panel:sale_detail', pk=invoice.pk)
 
 @require_POST
 def invoice_mark_paid(request, pk):
@@ -1149,7 +1220,7 @@ def invoice_mark_paid(request, pk):
             InvoicePayment.objects.create(invoice=invoice, amount=remaining)
         invoice.update_status()
         messages.success(request, "تم تحديد الفاتورة كمدفوعة بنجاح.")
-    return redirect('panel:invoice_detail', pk=invoice.pk)
+    return redirect('panel:sale_detail', pk=invoice.pk)
 
 @require_POST
 def invoice_mark_unpaid(request, pk):
@@ -1164,13 +1235,25 @@ def invoice_mark_unpaid(request, pk):
 @require_GET
 def invoice_pdf(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
+    # --- Add this block ---
+    discounted_items = []
+    for item in invoice.sale.items.all():
+        if (getattr(item, 'free_goods_discount', 0) and float(item.free_goods_discount) > 0) or \
+           (getattr(item, 'price_discount', 0) and float(item.price_discount) > 0):
+            discounted_items.append(item)
+    has_discount = bool(discounted_items)
+    # --- End block ---
     from django.template.loader import render_to_string
     from weasyprint import HTML, CSS
     import tempfile
-    # Use a dedicated PDF template
     html_string = render_to_string(
         'invoices/invoice_pdf.html',
-        {'invoice': invoice, 'request': request}
+        {
+            'invoice': invoice,
+            'request': request,
+            'has_discount': has_discount,  # pass to template
+            'discounted_items': discounted_items,  # pass to template
+        }
     )
     pdf_css = """
     body { font-family: 'Cairo', Arial, sans-serif; }
@@ -1644,4 +1727,49 @@ def supplier_delete(request, pk):
     return render(request, 'suppliers/supplier_confirm_delete.html', {
         'supplier': supplier,
         "active_sidebar": "suppliers"
+    })
+
+def lost_product_list(request):
+    """
+    List all lost products.
+    """
+    lost_products = LostProduct.objects.select_related('product', 'inventory', 'inventory__shipment').order_by('-lost_at')
+    return render(request, 'lost_products/lost_product_list.html', {
+        'lost_products': lost_products,
+        "active_sidebar": "lost_products"
+    })
+
+class LostProductForm(forms.ModelForm):
+    class Meta:
+        model = LostProduct
+        fields = ['product', 'inventory', 'quantity', 'note']
+        labels = {
+            'product': 'المنتج',
+            'inventory': 'الدفعة',
+            'quantity': 'الكمية المفقودة',
+            'note': 'ملاحظة',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['product'].widget.attrs.update({'class': 'form-select'})
+        self.fields['inventory'].widget.attrs.update({'class': 'form-select'})
+        self.fields['quantity'].widget.attrs.update({'class': 'form-control', 'min': 1})
+        self.fields['note'].widget.attrs.update({'class': 'form-control'})
+
+def lost_product_add(request):
+    """
+    Add a new lost product entry.
+    """
+    if request.method == 'POST':
+        form = LostProductForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "تم تسجيل المنتج المفقود بنجاح.")
+            return redirect('panel:lost_product_list')
+    else:
+        form = LostProductForm()
+    return render(request, 'lost_products/lost_product_form.html', {
+        'form': form,
+        "active_sidebar": "lost_products"
     })

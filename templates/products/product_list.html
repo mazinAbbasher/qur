@@ -3,7 +3,7 @@
 {% block content %}
 <div class="container py-4">
   <div class="row justify-content-center">
-    <div class="col-md-10">
+    <div class="col-md-12">
       <div class="card shadow">
         <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
           <h5 class="mb-0 text-white">قائمة المنتجات</h5>
@@ -17,17 +17,19 @@
               {% endfor %}
             </ul>
           {% endif %}
+          <!-- Reactive search input -->
+          <div class="mb-3">
+            <input type="text" id="product-search" class="form-control" placeholder="ابحث عن منتج...">
+          </div>
           <div class="table-responsive">
-            <table class="table align-middle">
+            <table class="table align-middle" id="products-table">
               <thead>
                 <tr>
                   <th>المنتج</th>
                   {% comment %} <th>التصنيف</th> {% endcomment %}
-                  
                   <th>سعر الصرف</th>
                   {% comment %} <th>تاريخ الانتهاء</th> {% endcomment %}
                   <th>الوحدة</th>
-
                   <th>إجراءات</th>
                 </tr>
               </thead>
@@ -38,10 +40,8 @@
                     <a href="{% url 'panel:product_detail' product.pk %}">{{ product.name }}</a>
                   </td>
                   {% comment %} <td>{{ product.get_category_display }}</td> {% endcomment %}
-                 
                   <td>{{ product.exchange_rate }}</td>
                   <td>{{ product.unit }}</td>
-                 
                   {% comment %} <td>{{ product.stock|intcomma }}</td> {% endcomment %}
                   {% comment %} <td>{{ product.stock }}</td> {% endcomment %}
                   {% comment %} <td>{{ product.expiry_date|date:"Y-m-d" }}</td> {% endcomment %}
@@ -58,6 +58,27 @@
               </tbody>
             </table>
           </div>
+          <!-- Reactive search script -->
+          <script>
+            document.addEventListener('DOMContentLoaded', function() {
+              const searchInput = document.getElementById('product-search');
+              const table = document.getElementById('products-table');
+              searchInput.addEventListener('input', function() {
+                const filter = this.value.trim().toLowerCase();
+                const rows = table.querySelectorAll('tbody tr');
+                rows.forEach(row => {
+                  const nameCell = row.querySelector('td a');
+                  if (!nameCell) return;
+                  const name = nameCell.textContent.trim().toLowerCase();
+                  if (name.includes(filter)) {
+                    row.style.display = '';
+                  } else {
+                    row.style.display = 'none';
+                  }
+                });
+              });
+            });
+          </script>
         </div>
       </div>
     </div>

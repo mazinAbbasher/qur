@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">تسجيل منتج مفقود</h5>
+        </div>
+        <div class="card-body">
+          <form method="post" id="lost-product-form" novalidate>
+            {% csrf_token %}
+            <div class="mb-3">
+              <label for="id_product" class="form-label">{{ form.product.label }}</label>
+              {{ form.product }}
+            </div>
+            <div class="mb-3">
+              <label for="id_inventory" class="form-label">{{ form.inventory.label }}</label>
+              <select name="inventory" id="id_inventory" class="form-select">
+                {% for inv in form.fields.inventory.queryset %}
+                  <option value="{{ inv.pk }}" data-product="{{ inv.product.pk }}" data-qty="{{ inv.quantity }}">
+                    {{ inv.shipment.batch_number }} 
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="id_quantity" class="form-label">{{ form.quantity.label }}</label>
+              <input type="number" name="quantity" id="id_quantity" class="form-control" min="1" required>
+              <div class="form-text text-danger d-none" id="qty-error">الكمية المفقودة أكبر من المتوفر في الدفعة.</div>
+            </div>
+            <div class="mb-3">
+              <label for="id_note" class="form-label">{{ form.note.label }}</label>
+              {{ form.note }}
+            </div>
+            <button type="submit" class="btn btn-success">حفظ</button>
+            <a href="{% url 'panel:lost_product_list' %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  // Cache DOM
+  const productSelect = document.getElementById('id_product');
+  const inventorySelect = document.getElementById('id_inventory');
+  const quantityInput = document.getElementById('id_quantity');
+  const qtyError = document.getElementById('qty-error');
+
+  // Helper: filter inventory options by product
+  function filterInventories() {
+    const selectedProduct = productSelect.value;
+    let found = false;
+    Array.from(inventorySelect.options).forEach(opt => {
+      if (!selectedProduct || opt.getAttribute('data-product') === selectedProduct) {
+        opt.style.display = '';
+        if (!found) {
+          inventorySelect.value = opt.value;
+          found = true;
+        }
+      } else {
+        opt.style.display = 'none';
+      }
+    });
+    if (!found) inventorySelect.value = '';
+    updateMaxQuantity();
+  }
+
+  // Helper: set max quantity based on selected inventory
+  function updateMaxQuantity() {
+    const selectedOpt = inventorySelect.options[inventorySelect.selectedIndex];
+    const maxQty = selectedOpt ? parseInt(selectedOpt.getAttribute('data-qty')) : 0;
+    quantityInput.max = maxQty || 1;
+    if (parseInt(quantityInput.value) > maxQty) {
+      quantityInput.value = maxQty;
+    }
+    qtyError.classList.add('d-none');
+  }
+
+  // Validate quantity on input
+  quantityInput.addEventListener('input', function() {
+    const maxQty = parseInt(quantityInput.max) || 0;
+    if (parseInt(quantityInput.value) > maxQty) {
+      qtyError.classList.remove('d-none');
+    } else {
+      qtyError.classList.add('d-none');
+    }
+  });
+
+  // Change inventory list when product changes
+  productSelect.addEventListener('change', filterInventories);
+  inventorySelect.addEventListener('change', updateMaxQuantity);
+
+  // Prevent submit if quantity invalid
+  document.getElementById('lost-product-form').addEventListener('submit', function(e) {
+    const maxQty = parseInt(quantityInput.max) || 0;
+    if (parseInt(quantityInput.value) > maxQty) {
+      qtyError.classList.remove('d-none');
+      quantityInput.focus();
+      e.preventDefault();
+    }
+  });
+
+  // Initial setup
+  filterInventories();
+})();
+</script>
+{% endblock %}

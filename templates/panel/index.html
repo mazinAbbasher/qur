@@ -245,6 +245,7 @@
                   <th>المبلغ</th>
                   <th>تاريخ الاستحقاق</th>
                   <th>الحالة</th>
+                  <th>عرض</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,6 +261,11 @@
                       {% else %}
                         <span class="badge bg-success">مدفوعة</span>
                       {% endif %}
+                    </td>
+                    <td class="px-4 py-2">
+                      <a href="{% url 'panel:sale_detail' invoice.sale.pk %}" class="btn btn-info btn-sm">
+                        <i class="bi bi-eye"></i> عرض
+                      </a>
                     </td>
                   </tr>
                 {% endfor %}
