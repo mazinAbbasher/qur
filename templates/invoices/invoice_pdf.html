@@ -285,7 +285,7 @@
                     <tr>
                         <th>Date</th>
                         <th>Amount</th>
-                        <th>Note</th>
+                        {% comment %} <th>Note</th> {% endcomment %}
                     </tr>
                 </thead>
                 <tbody>
@@ -293,7 +293,7 @@
                     <tr>
                         <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
                         <td style="text-align:right;">{{ p.amount|floatformat:"2" }}</td>
-                        <td>{{ p.note|default:"-" }}</td>
+                        {% comment %} <td>{{ p.note|default:"-" }}</td> {% endcomment %}
                     </tr>
                     {% endfor %}
                 </tbody>

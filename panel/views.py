@@ -661,6 +661,7 @@ class ShipmentForm(forms.ModelForm):
         # Only disable product field if editing (instance with pk)
         if self.instance and getattr(self.instance, 'pk', None):
             self.fields['product'].disabled = True
+            self.fields['quantity'].disabled = True  # <-- make quantity uneditable when editing
 
 def shipment_create(request):
     products = Product.objects.all()
