@@ -11,7 +11,7 @@ from datetime import timedelta  # <-- Add this import
 from .models import (
     Expense, Product, Invoice, Sale, SaleItem, Client, Employee,
     ExchangeRate, Area, Shipment, Commission, Inventory, InvoicePayment,
-    Supplier, SupplierPayment, LostProduct  # <-- add LostProduct
+    Supplier, SupplierPayment, LostProduct, ReturnedProduct  # <-- add ReturnedProduct
 )
 from django import forms
 from django.forms import inlineformset_factory, ModelForm
@@ -546,12 +546,30 @@ def get_employee_commission(request):
 def sale_detail(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
     invoice = Invoice.objects.filter(sale=sale).first()
+    returned_products = sale.returned_products.select_related('sale_item', 'sale_item__inventory', 'sale_item__inventory__product').all()
+    return_form = ReturnedProductForm(sale=sale)
     # Payment form logic is now handled inline in the template
     return render(request, 'panel/sale_detail.html', {
         'sale': sale,
         'invoice': invoice,
+        'returned_products': returned_products,
+        'return_form': return_form,
         "active_sidebar": "sales"
     })
+
+@require_POST
+def sale_return_product(request, pk):
+    sale = get_object_or_404(Sale, pk=pk)
+    form = ReturnedProductForm(sale=sale, data=request.POST)
+    if form.is_valid():
+        returned = form.save(commit=False)
+        returned.sale = sale
+        returned.save()
+        messages.success(request, f"تم تسجيل إرجاع {returned.quantity} وحدة من {returned.sale_item.inventory.product.name}.")
+    else:
+        for error in form.errors.values():
+            messages.error(request, error)
+    return redirect('panel:sale_detail', pk=sale.pk)
 
 def sale_list(request):
     sales = Sale.objects.select_related('client', 'employee').order_by('-created_at')
@@ -1244,6 +1262,11 @@ def invoice_pdf(request, pk):
             discounted_items.append(item)
     has_discount = bool(discounted_items)
     # --- End block ---
+    # --- Add returned products ---
+    returned_products = invoice.sale.returned_products.select_related(
+        'sale_item', 'sale_item__inventory', 'sale_item__inventory__product'
+    ).all()
+    # --- End returned products ---
     from django.template.loader import render_to_string
     from weasyprint import HTML, CSS
     import tempfile
@@ -1254,6 +1277,7 @@ def invoice_pdf(request, pk):
             'request': request,
             'has_discount': has_discount,  # pass to template
             'discounted_items': discounted_items,  # pass to template
+            'returned_products': returned_products,  # pass to template
         }
     )
     pdf_css = """
@@ -1774,3 +1798,32 @@ def lost_product_add(request):
         'form': form,
         "active_sidebar": "lost_products"
     })
+
+class ReturnedProductForm(forms.ModelForm):
+    class Meta:
+        model = ReturnedProduct
+        fields = ['sale_item', 'quantity', 'note']
+        labels = {
+            'sale_item': 'العنصر المباع',
+            'quantity': 'الكمية المرجعة',
+            'note': 'ملاحظة',
+        }
+
+    def __init__(self, sale=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if sale:
+            self.fields['sale_item'].queryset = sale.items.all()
+        self.fields['quantity'].widget.attrs.update({'class': 'form-control', 'min': 1})
+        self.fields['note'].widget.attrs.update({'class': 'form-control'})
+
+    def clean(self):
+        cleaned_data = super().clean()
+        sale_item = cleaned_data.get('sale_item')
+        quantity = cleaned_data.get('quantity')
+        if sale_item and quantity:
+            # Only allow returning up to sold quantity minus already returned
+            already_returned = sum(r.quantity for r in sale_item.returns.all())
+            max_returnable = sale_item.quantity - already_returned
+            if quantity > max_returnable:
+                raise forms.ValidationError(f"لا يمكن إرجاع أكثر من {max_returnable} وحدة لهذا العنصر.")
+        return cleaned_data

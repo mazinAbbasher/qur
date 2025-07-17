@@ -15,6 +15,7 @@ urlpatterns = [
     path('sales/', views.sale_list, name='sale_list'),
     path('sales/add/', views.sale_create, name='sale_create'),
     path('sales/<int:pk>/', views.sale_detail, name='sale_detail'),
+    path('sales/<int:pk>/return_product/', views.sale_return_product, name='sale_return_product'),
 
     # Shipment URLs
     path('shipments/', views.shipment_list, name='shipment_list'),

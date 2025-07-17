@@ -239,7 +239,9 @@ class Sale(models.Model):
 
     def calculate_total(self):
         total = sum(item.get_total for item in self.items.all())
-        self.total = total
+        # Subtract returned products value
+        returned_total = sum(r.value for r in self.returned_products.all())
+        self.total = total - returned_total
         self.save()
         return self.total
 
@@ -280,6 +282,38 @@ class SaleItem(models.Model):
     def __str__(self):
         return f"{self.quantity} x {self.inventory.product.name} (Batch {self.inventory.shipment.batch_number})"
 
+class ReturnedProduct(models.Model):
+    sale = models.ForeignKey('Sale', on_delete=models.CASCADE, related_name='returned_products')
+    sale_item = models.ForeignKey('SaleItem', on_delete=models.CASCADE, related_name='returns')
+    quantity = models.PositiveIntegerField()
+    created_at = models.DateTimeField(default=timezone.now)
+    note = models.CharField(max_length=255, blank=True, null=True)
+
+    def save(self, *args, **kwargs):
+        # On creation, increase inventory and decrease sale total
+        if not self.pk:
+            # Increase inventory
+            self.sale_item.inventory.quantity += self.quantity
+            self.sale_item.inventory.save()
+        super().save(*args, **kwargs)
+        # Recalculate sale total
+        self.sale.calculate_total()
+
+    def delete(self, *args, **kwargs):
+        # On delete, decrease inventory and restore sale total
+        self.sale_item.inventory.quantity -= self.quantity
+        self.sale_item.inventory.save()
+        super().delete(*args, **kwargs)
+        self.sale.calculate_total()
+
+    @property
+    def value(self):
+        # Value of returned items (use discounted price)
+        return self.quantity * self.sale_item.discounted_unit_price
+
+    def __str__(self):
+        return f"Returned {self.quantity} of {self.sale_item.inventory.product.name} (Sale #{self.sale.pk})"
+
 class Invoice(models.Model):
     sale = models.OneToOneField(Sale, on_delete=models.CASCADE)
     created_at = models.DateTimeField(default=timezone.now)
@@ -312,7 +346,7 @@ class Invoice(models.Model):
     @property
     def remaining_amount(self):
         from decimal import Decimal
-        return max(self.total - self.paid_amount, Decimal('0'))
+        return self.sale.total - self.paid_amount
 
     def update_status(self):
         paid = self.paid_amount

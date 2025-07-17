@@ -204,7 +204,7 @@
             </div>
             <div class="amount-card">
                 <strong>Total</strong>
-                <span class="amount">{{ invoice.total|floatformat:"2" }} SDG</span>
+                <span class="amount">{{ invoice.sale.total|floatformat:"2" }} SDG</span>
             </div>
         </div>
         <div class="section-title">Products Details</div>
@@ -269,14 +269,34 @@
                     </th>
                 </tr>
                 {% endif %}
-                <tfoot>
-                    <tr>
-                        <th colspan="{% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}4{% else %}3{% endif %}" style="text-align:right;">Grand Total</th>
-                        <th>{{ invoice.total|floatformat:"2" }}</th>
-                    </tr>
-                </tfoot>
+                
             </table>
         </div>
+        {% if returned_products and returned_products|length > 0 %}
+        <div class="section-title">Returned Products</div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Quantity</th>
+                        <th>Value</th>
+                        {% comment %} <th>Note</th> {% endcomment %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for returned in returned_products %}
+                    <tr>
+                        <td>{{ returned.sale_item.inventory.product.name }}</td>
+                        <td>{{ returned.quantity }}</td>
+                        <td>{{ returned.value|floatformat:"2" }}</td>
+                        {% comment %} <td>{{ returned.note|default:"-" }}</td> {% endcomment %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
         {% if invoice.payments.exists %}
         <div class="section-title">Payment History</div>
         <div class="table-container">
@@ -300,6 +320,10 @@
             </table>
         </div>
         {% endif %}
+
+               <h4 class ="p-2 font-bold" style="margin: 32px 0px 0 32px;"> Grand Total : {{ invoice.sale.total|floatformat:"2" }}</h4>
+
+           
         <div class="signature">
             Thank you for your business!
         </div>
