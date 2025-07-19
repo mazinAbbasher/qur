@@ -12,7 +12,13 @@
           </a>
         </div>
         <div class="card-body">
-            {% if messages %}
+          <!-- Download & Share PDF Button -->
+          <div class="mb-3 d-flex justify-content-end">
+            <a href="{% url 'panel:area_list_pdf' %}" class="btn btn-outline-primary" target="_blank">
+              <i class="bi bi-file-earmark-pdf"></i> تحميل ومشاركة PDF
+            </a>
+          </div>
+          {% if messages %}
             <ul class="messages">
               {% for message in messages %}
                 <li class="alert alert-{{ message.tags }}">{{ message }}</li>

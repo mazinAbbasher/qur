@@ -6,6 +6,12 @@
     <h4 class="mb-0">قائمة الموردين</h4>
     <a href="{% url 'panel:supplier_add' %}" class="btn btn-success">إضافة مورد جديد</a>
   </div>
+  <!-- Download & Share PDF Button -->
+  <div class="mb-3 d-flex justify-content-end">
+    <a href="{% url 'panel:supplier_list_pdf' %}" class="btn btn-outline-primary" target="_blank">
+      <i class="bi bi-file-earmark-pdf"></i> تحميل ومشاركة PDF
+    </a>
+  </div>
   {% if messages %}
             <ul class="messages">
               {% for message in messages %}

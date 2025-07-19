@@ -264,6 +264,34 @@ def client_list(request):
         "active_sidebar": "clients"
     })
 
+@require_GET
+def client_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    clients = Client.objects.select_related('area').all()
+    search = request.GET.get('search')
+    area_id = request.GET.get('area')
+    if search:
+        clients = clients.filter(name__icontains=search)
+    if area_id:
+        clients = clients.filter(area_id=area_id)
+    clients = clients.annotate(total_sales=Sum('sale__total'))
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('panel/client_list_pdf.html', {
+        'clients': clients,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'client_list_{date.today().isoformat()}.pdf')
+
 def clients_by_area(request):
     area_id = request.GET.get('area')
     areas = Area.objects.all()
@@ -278,6 +306,28 @@ def clients_by_area(request):
         'selected_area': int(area_id) if area_id else None,
         "active_sidebar": "clients"
     })
+
+@require_GET
+def area_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    from django.db.models import Sum
+    areas = Area.objects.annotate(total_sales=Sum('client__sale__total'))
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('areas/area_list_pdf.html', {
+        'areas': areas,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'area_list_{date.today().isoformat()}.pdf')
 
 def area_sales_report(request):
     # Revenue per area
@@ -623,6 +673,97 @@ def sale_list(request):
         'selected_client': int(client_id) if client_id else None,
     })
 
+@require_GET
+def sale_list_pdf(request):
+    """
+    Export the current sales list as a PDF for sharing/printing.
+    """
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    # Use same filtering logic as sale_list
+    sales = Sale.objects.select_related('client', 'employee').order_by('-created_at')
+    from django.db.models import Prefetch
+    invoices = Invoice.objects.all()
+    sales = sales.prefetch_related(Prefetch('invoice', queryset=invoices))
+
+    invoice_number = request.GET.get('invoice_number')
+    if invoice_number:
+        sales = sales.filter(invoice__number__icontains=invoice_number)
+    area_id = request.GET.get('area')
+    status = request.GET.get('status')
+    employee_id = request.GET.get('employee')
+    client_id = request.GET.get('client')
+    if area_id:
+        sales = sales.filter(client__area_id=area_id)
+    if status == "partial_or_unpaid":
+        sales = sales.filter(invoice__status__in=["partial", "unpaid"])
+    elif status:
+        sales = sales.filter(invoice__status=status)
+    if employee_id:
+        sales = sales.filter(employee_id=employee_id)
+    if client_id:
+        sales = sales.filter(client_id=client_id)
+
+    # Logo path (if available)
+    logo_url = request.build_absolute_uri('/static/logo.png')  # Adjust path as needed
+
+    # Render PDF HTML
+    html_string = render_to_string('panel/sale_list_pdf.html', {
+        'sales': sales,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    pdf_css = """
+    body { font-family: 'Cairo', Arial, sans-serif; }
+    .header { background: #007bff; color: #fff; padding: 12px; text-align: center; }
+    .logo { max-height: 60px; margin-bottom: 10px; }
+    .table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .table th, .table td { border: 1px solid #333; padding: 6px; text-align: right; }
+    .badge { padding: 4px 8px; border-radius: 4px; }
+    .bg-success { background: #28a745 !important; color: #fff !important; }
+    .bg-danger { background: #dc3545 !important; color: #fff !important; }
+    .bg-warning { background: #ffc107 !important; color: #212529 !important; }
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
+            output.name,
+            stylesheets=[CSS(string=pdf_css)]
+        )
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    filename = f"sales_list_{date.today().isoformat()}.pdf"
+    response = FileResponse(
+        io.BytesIO(pdf),
+        as_attachment=True,
+        filename=filename
+    )
+    return response
+
+@require_GET
+def supplier_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    suppliers = Supplier.objects.all()
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('suppliers/supplier_list_pdf.html', {
+        'suppliers': suppliers,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'supplier_list_{date.today().isoformat()}.pdf')
+
 def shipment_list(request):
     """
     List shipments with optional search/filter and pagination.
@@ -639,6 +780,87 @@ def shipment_list(request):
         'search': search,
         "active_sidebar": "shipments"
     })
+
+@require_GET
+def shipment_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    shipments = Shipment.objects.select_related('product').all().order_by('-received_at')
+    search = request.GET.get('search')
+    if search:
+        shipments = shipments.filter(product__name__icontains=search)
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('shipments/shipment_list_pdf.html', {
+        'shipments': shipments,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'shipment_list_{date.today().isoformat()}.pdf')
+
+@require_GET
+def inventory_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    inventories = Inventory.objects.select_related('product', 'shipment').order_by('shipment__expiry_date')
+    search = request.GET.get('search')
+    if search:
+        inventories = inventories.filter(product__name__icontains=search)
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('inventory/inventory_list_pdf.html', {
+        'inventories': inventories,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'inventory_list_{date.today().isoformat()}.pdf')
+
+@require_GET
+def expense_list_pdf(request):
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+
+    expenses = Expense.objects.all().order_by('-date')
+    months = []
+    for e in Expense.objects.dates('date', 'month', order='DESC'):
+        months.append({'value': e.strftime('%Y-%m'), 'label': e.strftime('%B %Y')})
+    selected_month = request.GET.get('month')
+    if selected_month:
+        try:
+            year, month = map(int, selected_month.split('-'))
+            expenses = expenses.filter(date__year=year, date__month=month)
+        except Exception:
+            pass
+    logo_url = request.build_absolute_uri('/static/logo.png')
+    html_string = render_to_string('expenses/expense_list_pdf.html', {
+        'expenses': expenses,
+        'months': months,
+        'selected_month': selected_month,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    return FileResponse(io.BytesIO(pdf), as_attachment=True, filename=f'expense_list_{date.today().isoformat()}.pdf')
 
 class ShipmentForm(forms.ModelForm):
     # batch_number = forms.CharField(label="رقم التشغيلة", required=True)

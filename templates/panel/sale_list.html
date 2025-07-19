@@ -12,6 +12,12 @@
           </a>
         </div>
         <div class="card-body">
+          <!-- Download & Share PDF Button -->
+          <div class="mb-3 d-flex justify-content-end">
+            <a href="{% url 'panel:sale_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" target="_blank">
+              <i class="bi bi-file-earmark-pdf"></i> تحميل ومشاركة PDF
+            </a>
+          </div>
           <!-- Filter form -->
           <form method="get" class="row g-2 mb-3 align-items-end">
             <div class="col-md-2">

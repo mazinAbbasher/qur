@@ -16,6 +16,7 @@ urlpatterns = [
     path('sales/add/', views.sale_create, name='sale_create'),
     path('sales/<int:pk>/', views.sale_detail, name='sale_detail'),
     path('sales/<int:pk>/return_product/', views.sale_return_product, name='sale_return_product'),
+    path('sales/export/pdf/', views.sale_list_pdf, name='sale_list_pdf'),
 
     # Shipment URLs
     path('shipments/', views.shipment_list, name='shipment_list'),
@@ -23,6 +24,7 @@ urlpatterns = [
     path('shipments/<int:pk>/edit/', views.shipment_edit, name='shipment_edit'),
     path('shipments/<int:pk>/delete/', views.shipment_delete, name='shipment_delete'),
     path('shipments/profit/', views.shipment_profit_report, name='shipment_profit_report'),
+    path('shipments/export/pdf/', views.shipment_list_pdf, name='shipment_list_pdf'),
 
     # Employee URLs
     path('employees/', views.employee_list, name='employee_list'),
@@ -37,12 +39,14 @@ urlpatterns = [
     path('clients/<int:pk>/edit/', views.client_edit, name='client_edit'),
     path('clients/<int:pk>/delete/', views.client_delete, name='client_delete'),
     path('clients/<int:pk>/detail/', views.client_detail, name='client_detail'),
+    path('clients/export/pdf/', views.client_list_pdf, name='client_list_pdf'),
 
     # Area URLs
     path('areas/', views.area_list, name='area_list'),
     path('areas/add/', views.area_add, name='area_add'),
     path('areas/<int:pk>/edit/', views.area_edit, name='area_edit'),
     path('areas/<int:pk>/delete/', views.area_delete, name='area_delete'),
+    path('areas/export/pdf/', views.area_list_pdf, name='area_list_pdf'),
 
     # Commissions
     path('commissions/', views.sale_commissions, name='sale_commissions'),
@@ -63,10 +67,12 @@ urlpatterns = [
     path('expenses/add/', views.expense_add, name='expense_add'),
     path('expenses/<int:pk>/edit/', views.expense_edit, name='expense_edit'),
     path('expenses/<int:pk>/delete/', views.expense_delete, name='expense_delete'),
+    path('expenses/export/pdf/', views.expense_list_pdf, name='expense_list_pdf'),
 
     # Inventory URLs
     path('inventory/', views.inventory_list, name='inventory_list'),
     # Removed add/edit/delete inventory URLs
+    path('inventory/export/pdf/', views.inventory_list_pdf, name='inventory_list_pdf'),
 
     path('lost-products/', views.lost_product_list, name='lost_product_list'),
     path('lost-products/add/', views.lost_product_add, name='lost_product_add'),
@@ -89,4 +95,5 @@ urlpatterns = [
     path('suppliers/<int:pk>/', views.supplier_detail, name='supplier_detail'),
     path('suppliers/<int:pk>/delete/', views.supplier_delete, name='supplier_delete'),
     path('suppliers/<int:pk>/add_payment/', views.supplier_add_payment, name='supplier_add_payment'),
+    path('suppliers/export/pdf/', views.supplier_list_pdf, name='supplier_list_pdf'),
 ]

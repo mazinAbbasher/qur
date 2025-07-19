@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Sales List</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #222;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+        }
+        .invoice-container {
+            max-width: 700px;
+            margin: 40px auto;
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 0 0 24px 0;
+        }
+        .my-header {
+            padding: 32px 32px 16px 32px;
+            border-bottom: 1px solid #bbb;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+        .company-logo {
+            height: 70px;
+            width: auto;
+            object-fit: contain;
+            margin-right: 24px;
+        }
+        .company-details {
+            flex: 1;
+        }
+        .company-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-top: 1.1em;
+        }
+        .title-block {
+            text-align: right;
+        }
+        .title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 0.2em;
+            margin-top: 0.6em;
+        }
+        .subtitle {
+            font-size: 1em;
+            color: #666;
+            margin-bottom: 4px;
+        }
+        .date {
+            font-size: 0.95em;
+            color: #444;
+            margin-bottom: 0;
+        }
+        .table-container {
+            margin: 0 32px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            margin-bottom: 0;
+        }
+        th, td {
+            padding: 8px 4px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+            font-size: 1em;
+        }
+        th {
+            background: none;
+            font-weight: bold;
+            border-bottom: 2px solid #bbb;
+        }
+        td:last-child, th:last-child {
+            text-align: right;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 0.95em;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+        .bg-success { background: #28a745; color: #fff; }
+        .bg-danger { background: #dc3545; color: #fff; }
+        .bg-warning { background: #ffc107; color: #212529; }
+        .footer {
+            margin-top: 36px;
+            font-size: 0.95em;
+            color: #888;
+            text-align: center;
+            padding: 18px 0 0 0;
+            border-top: 1px solid #bbb;
+            background: #fff;
+        }
+        @page {
+            margin: 32px 24px 32px 24px;
+            @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 0.9em;
+                color: #888;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="invoice-container">
+        <div class="my-header">
+            {% if logo_url %}
+                <img src="{{ logo_url }}" class="company-logo" alt="Logo">
+            {% endif %}
+            <div class="company-details">
+                <div class="company-name">Modern Software Co.</div>
+            </div>
+            <div class="title-block">
+                <div class="title">Sales List</div>
+                <div class="subtitle">Company Sales Report</div>
+                <div class="date">Date: {{ today }}</div>
+            </div>
+        </div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Invoice</th>
+                        <th>Client</th>
+                        <th>Employee</th>
+                        <th>Date</th>
+                        <th>Total</th>
+                        <th>Paid</th>
+                        <th>Remaining</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for sale in sales %}
+                    <tr>
+                        <td>{{ sale.invoice.number }}</td>
+                        <td>
+                            {% if sale.client %}
+                                {{ sale.client.name }}
+                                {% if sale.client.phone %}
+                                    <span style="color:#888;font-size:0.95em;">({{ sale.client.phone }})</span>
+                                {% endif %}
+                            {% else %}
+                                <span style="color:#bbb;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sale.employee %}
+                                {{ sale.employee.name }}
+                            {% else %}
+                                <span style="color:#bbb;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ sale.created_at|date:"Y-m-d H:i" }}</td>
+                        <td>{{ sale.total|floatformat:2 }}</td>
+                        <td>
+                            {% if sale.invoice %}
+                                {{ sale.invoice.paid_amount|floatformat:2 }}
+                            {% else %}
+                                <span style="color:#bbb;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sale.invoice %}
+                                {{ sale.invoice.remaining_amount|floatformat:2 }}
+                            {% else %}
+                                <span style="color:#bbb;">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if sale.invoice %}
+                                <span class="badge 
+                                    {% if sale.invoice.status == 'paid' %}bg-success
+                                    {% elif sale.invoice.status == 'partial' %}bg-warning
+                                    {% else %}bg-danger{% endif %}">
+                                    {% if sale.invoice.status == 'paid' %}Paid
+                                    {% elif sale.invoice.status == 'partial' %}Partially Paid
+                                    {% else %}Unpaid{% endif %}
+                                </span>
+                            {% else %}
+                                <span style="color:#bbb;">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" style="text-align:center;color:#bbb;">No sales found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="footer">
+            Modern Software Co. &mdash; All rights reserved &copy; {{ today|date:"Y" }}<br>
+            Report generated automatically by the system
+        </div>
+    </div>
+</body>
+</html>
