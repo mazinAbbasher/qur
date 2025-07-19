@@ -6,14 +6,14 @@
     <div class="col-md-12">
       <div class="card shadow">
         <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-          <h5 class="mb-0 text-white">قائمة الشحنات</h5>
-          <a href="{% url 'panel:shipment_create' %}" class="btn btn-success">إضافة شحنة جديدة</a>
+          <h5 class="mb-0 text-white">قائمة المشتروات</h5>
+          <a href="{% url 'panel:shipment_create' %}" class="btn btn-success">إضافة شراء جديد</a>
         </div>
         <div class="card-body">
           <!-- Download & Share PDF Button -->
           <div class="mb-3 d-flex justify-content-end">
             <a href="{% url 'panel:shipment_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" target="_blank">
-              <i class="bi bi-file-earmark-pdf"></i> تحميل ومشاركة PDF
+              <i class="bi bi-file-earmark-pdf"></i> تحميل  PDF
             </a>
           </div>
           <form method="get" class="mb-3">
