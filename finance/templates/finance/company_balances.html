@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4 class="mb-0">أرصدة الشركة حسب العملة</h4>
+      {% comment %} <p class="text-muted mt-2">
+        <strong>تنويه:</strong> لا يمكن إضافة أو تعديل الأرصدة مباشرة. يتم تحديث الأرصدة تلقائيًا عند تسجيل عمليات شراء العملات أو العمليات المالية للشركاء.
+        لإضافة رصيد جديد، يرجى تسجيل عملية شراء عملة أو عملية مالية من خلال لوحة التحكم أو سجل العمليات.
+      </p> {% endcomment %}
+    </div>
+    {% comment %} <div class="col-md-4 text-end">
+      <a href="{% url 'financial_dashboard' %}" class="btn btn-outline-info">لوحة التحكم المالية</a>
+      {% if show_currency_purchases_link %}
+      <a href="{% url 'currency_purchases_list' %}" class="btn btn-outline-info ms-2" title="سجل شراء العملات">سجل شراء العملات</a>
+      {% endif %}
+    </div> {% endcomment %}
+  </div>
+  <div class="card shadow">
+    <div class="card-body">
+      <table class="table table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>العملة</th>
+            <th>الرصيد</th>
+            <th>ما يعادل بالجنيه <span title="حسب سعر الصرف المسجل">🛈</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% with total_sdg=0 %}
+          {% for b in balances_sdg %}
+          <tr>
+            <td>{{ b.currency }}</td>
+            <td>{{ b.balance|floatformat:2 }}</td>
+            <td>
+              {{ b.sdg_equiv|floatformat:2 }}
+              {% with total_sdg=total_sdg|add:b.sdg_equiv %}
+              {% endwith %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3" class="text-center text-muted">لا توجد عملات مسجلة.</td>
+          </tr>
+          {% endfor %}
+          <tr class="table-info summary">
+            <td colspan="2">إجمالي بالجنيه</td>
+            <td>{{ total_sdg|floatformat:2 }}</td>
+          </tr>
+          {% endwith %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

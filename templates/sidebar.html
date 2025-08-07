@@ -143,6 +143,48 @@
     </li> {% endcomment %}
     {% comment %} {% endif %} {% endcomment %}
 
+    {# Finance Section #}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'finance_dashboard' %}active bg-gradient-info{% endif %}" href="{% url 'financial_dashboard' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/operation.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">لوحة التحكم المالية</span>
+      </a>
+    </li>
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'company_balances' %}active bg-gradient-info{% endif %}" href="{% url 'company_balances' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/expenses.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">أرصدة الشركة</span>
+      </a>
+    </li> {% endcomment %}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'partners_list' %}active bg-gradient-info{% endif %}" href="{% url 'partners_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/client.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">الشركاء</span>
+      </a>
+    </li>
+    {% comment %} <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'operation_history' %}active bg-gradient-info{% endif %}" href="{% url 'operation_history' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/paid.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1"> العمليات المالية</span>
+      </a>
+    </li> {% endcomment %}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'currency_purchases' %}active bg-gradient-info{% endif %}" href="{% url 'currency_purchases_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/exc.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">شراء العملات</span>
+      </a>
+    </li>
+
     {# Reports Section (all roles) #}
     {% comment %} <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'reports' %}active bg-gradient-info{% endif %}" href="{% url 'panel:reports' %}">

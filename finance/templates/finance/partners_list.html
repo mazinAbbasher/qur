@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+{% load humanize %}
+
+<!-- Partner management: registration, withdrawals, deposits, edit, delete -->
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4 class="mb-0">الشركاء</h4>
+      {% comment %} <p class="text-muted mt-2">يمكنك إدارة بيانات الشركاء، إضافة عمليات مالية، أو تعديل وحذف الشركاء من هنا.</p> {% endcomment %}
+    </div>
+    <div class="col-md-4 text-end">
+      {% comment %} <a href="{% url 'financial_dashboard' %}" class="btn btn-outline-info">لوحة التحكم المالية</a> {% endcomment %}
+      <a href="{% url 'partner_add' %}" class="btn btn-success ms-2" title="إضافة شريك جديد">إضافة شريك جديد</a>
+    </div>
+  </div>
+  <div class="card shadow">
+    <div class="card-body">
+      <table class="table table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>الاسم</th>
+            {% comment %} <th>العملة</th>
+            <th>المبلغ المستثمر</th>
+            <th>نسبة الملكية</th> {% endcomment %}
+            <th>الرصيد الحالي</th>
+            <th>العمليات</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for partner in partners %}
+          <tr>
+            <td>{{ partner.full_name }}</td>
+            {% comment %} <td>{{ partner.currency.code }}</td>
+            <td>{{ partner.amount_invested }}</td>
+            <td>{{ partner.ownership_percentage }}</td> {% endcomment %}
+            <td>
+              {% for pb in partner.balances.all %}
+                <span class="badge bg-primary">{{ pb.currency.code }}: {{ pb.balance|floatformat:0|intcomma }}</span>
+              {% empty %}
+                <span class="text-muted">لا يوجد أرصدة</span>
+              {% endfor %}
+            </td>            <td>
+              <a href="{% url 'partner_transactions' partner.id %}" class="btn btn-primary btn-sm" title="عرض العمليات المالية">عرض العمليات</a>
+              <a href="{% url 'transaction_add' partner.id %}" class="btn btn-success btn-sm" title="إضافة عملية مالية">إضافة عملية</a>
+            </td>
+            <td>
+              <a href="{% url 'partner_edit' partner.id %}" class="btn btn-warning btn-sm" title="تعديل بيانات الشريك">تعديل</a>
+              {% comment %} <a href="{% url 'partner_delete' partner.id %}" class="btn btn-danger btn-sm" title="حذف الشريك">حذف</a> {% endcomment %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="text-center text-muted">لا يوجد شركاء.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<!-- Add/edit partner withdrawal/deposit -->
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">
+            {% if tx %}تعديل عملية مالية{% else %}إضافة عملية مالية جديدة{% endif %}
+          </h5>
+          <p class="mb-0 text-white-50 small">يرجى التأكد من صحة البيانات قبل الحفظ.</p>
+        </div>
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {{ form|crispy }}
+            <!-- No account field -->
+            <button type="submit" class="btn btn-success">
+              {% if tx %}تحديث{% else %}إضافة{% endif %}
+            </button>
+            <a href="{% url 'partner_transactions' partner.id %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

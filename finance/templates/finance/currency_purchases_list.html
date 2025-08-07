@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+{% load humanize %}
+
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4 class="mb-0">سجل شراء العملات</h4>
+    </div>
+    <div class="col-md-4 text-end">
+      <a href="{% url 'currency_purchase_add' %}" class="btn btn-success">إضافة عملية شراء عملة</a>
+    </div>
+  </div>
+  <div class="card shadow mb-3">
+    <div class="card-body">
+      <form method="get" class="row g-2 align-items-end" id="filter-form">
+        <div class="col-md-3">
+          <label class="form-label">العملة</label>
+          <select name="currency" class="form-select">
+            <option value="">الكل</option>
+            {% for currency in currencies %}
+              <option value="{{ currency.id }}" {% if currency.id|stringformat:"s" == selected_currency %}selected{% endif %}>{{ currency.code }} - {{ currency.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">من تاريخ</label>
+          <input type="date" name="date_from" class="form-control" value="{{ date_from|default_if_none:'' }}">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">إلى تاريخ</label>
+          <input type="date" name="date_to" class="form-control" value="{{ date_to|default_if_none:'' }}">
+        </div>
+        <div class="col-md-3 d-flex gap-2">
+          <button type="submit" class="btn btn-primary">تصفية</button>
+          <a href="?{% if selected_currency %}currency={{selected_currency}}&{% endif %}{% if date_from %}date_from={{date_from}}&{% endif %}{% if date_to %}date_to={{date_to}}&{% endif %}download=pdf" class="btn btn-outline-secondary">تحميل PDF</a>
+        </div>
+      </form>
+      <script>
+        document.addEventListener('DOMContentLoaded', function() {
+          const form = document.getElementById('filter-form');
+          form.querySelectorAll('select, input[type="date"]').forEach(function(input) {
+            input.addEventListener('change', function() {
+              form.submit();
+            });
+          });
+        });
+      </script>
+    </div>
+  </div>
+  <div class="card shadow">
+    <div class="card-body">
+      <table class="table table-bordered align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>العملة</th>
+            <th>المبلغ</th>
+            <th>سعر الصرف</th>
+            <th>التاريخ</th>
+            <th>ملاحظة</th>
+            <th>إجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for purchase in purchases %}
+          <tr>
+            <td>{{ purchase.currency.code }}</td>
+            <td>{{ purchase.amount|floatformat:0|intcomma }}</td>
+            <td>{{ purchase.exchange_rate|floatformat:0|intcomma }}</td>
+            <td>{{ purchase.date }}</td>
+            <td>{{ purchase.note }}</td>
+            <td>
+              <a href="{% url 'currency_purchase_edit' purchase.id %}" class="btn btn-warning btn-sm">تعديل</a>
+              <a href="{% url 'currency_purchase_delete' purchase.id %}" class="btn btn-danger btn-sm" onclick="return confirm('هل أنت متأكد من حذف عملية الشراء؟');">حذف</a>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="6" class="text-center text-muted">لا توجد عمليات شراء عملة.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

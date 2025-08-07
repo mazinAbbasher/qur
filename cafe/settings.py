@@ -43,6 +43,9 @@ INSTALLED_APPS = [
     'crispy_forms',
     'crispy_tailwind',
 
+    "finance",
+    'pwa',
+
 ]
 
 MIDDLEWARE = [
@@ -139,3 +142,24 @@ DATE_FORMAT = 'd/m/Y'
 
 # Make sure Django doesn't use localization that overrides it
 USE_L10N = False
+
+PWA_APP_NAME = 'Equatorial System'
+PWA_APP_DESCRIPTION = "Equatorial medical management system"
+PWA_APP_THEME_COLOR = '#000000'
+PWA_APP_BACKGROUND_COLOR = '#ffffff'
+PWA_APP_DISPLAY = 'standalone'
+PWA_APP_SCOPE = '/'
+PWA_APP_ORIENTATION = 'portrait'
+PWA_APP_START_URL = '/'
+PWA_APP_ICONS = [
+    {
+        'src': '/static/icon.png',
+        'sizes': '192x192'
+    },
+    {
+        'src': '/static/icon.png',
+        'sizes': '512x512'
+    }
+]
+PWA_APP_DIR = 'ltr'
+PWA_APP_LANG = 'en-US'

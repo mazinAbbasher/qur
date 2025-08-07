@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<!-- Confirm partner transaction (withdrawal/deposit) deletion -->
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-6">
+      <div class="card shadow">
+        <div class="card-header bg-danger text-white">
+          <h5 class="mb-0 text-white">تأكيد حذف العملية</h5>
+        </div>
+        <div class="card-body">
+          <p>هل أنت متأكد من حذف العملية <strong>{{ tx.get_transaction_type_display }} {{ tx.amount }}</strong>؟</p>
+          <form method="post">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">حذف</button>
+            <a href="{% url 'partner_transactions' tx.partner.id %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

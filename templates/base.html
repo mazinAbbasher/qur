@@ -1,10 +1,11 @@
 {% load static %}
 {% load sidebar %}
+{% load pwa %}
 <!DOCTYPE html>
 <html  dir="rtl" >
 
 <head>
-
+  {% progressive_web_app_meta %}
 <style>
     .messages {
         list-style-type: none;
@@ -44,8 +45,11 @@ Equatorial</title>
   <!--     Fonts and icons     -->
   {% comment %} <link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Noto+Kufi+Arabic" /> {% endcomment %}
   <!-- Nucleo Icons -->
-  <link href="{% static "assets/css/nucleo-icons.css" rel="stylesheet" %}">
-  <link href="{% static "assets/css/nucleo-svg.css" rel="stylesheet" %}">
+
+  <link href="{% static "oh.css"%}" rel="stylesheet" >
+  <link href="{% static "assets/css/nucleo-icons.css"%}" rel="stylesheet" >
+  <link href="{% static "assets/css/nucleo-svg.css"%}" rel="stylesheet" >
+  
   <!-- Font Awesome Icons -->
   {% comment %} <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script> {% endcomment %}
   <!-- Material Icons -->

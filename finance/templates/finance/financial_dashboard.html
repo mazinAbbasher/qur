@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% load dict_extras %}
+{% block content %}
+{% load humanize %}
+<div class="container py-4">
+  <div class="row mb-3">
+    <div class="col-md-8">
+      <h4 class="mb-0">لوحة التحكم المالية</h4>
+      {% comment %} <p class="text-muted mt-2">
+        عرض شامل لأرصدة الشركة، ملخص شراء العملات، واستثمارات وسحوبات الشركاء.<br>
+        جميع البيانات مترابطة ويمكن إدارتها من هنا.
+      </p> {% endcomment %}
+    </div>
+    {% comment %} <div class="col-md-4 text-end">
+      <a href="{% url 'company_balances' %}" class="btn btn-outline-info ms-2" title="عرض أرصدة الشركة حسب العملة">أرصدة الشركة</a>
+      <a href="{% url 'currency_purchases_list' %}" class="btn btn-outline-info ms-2" title="سجل شراء العملات">سجل شراء العملات</a>
+      <a href="{% url 'partners_list' %}" class="btn btn-outline-info ms-2" title="إدارة الشركاء">الشركاء</a>
+      <a href="{% url 'operation_history' %}" class="btn btn-outline-info" title="سجل العمليات المالية">سجل العمليات</a>
+    </div> {% endcomment %}
+  </div>
+  <div class="row">
+    <div class="col-md-12">
+      <!-- Real-time balances by currency -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0  text-white">أرصدة الشركة حسب العملة</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>العملة</th>
+                <th>الرصيد</th>
+                <th>ما يعادل بالجنيه <span title="حسب سعر الصرف المسجل">🛈</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in balances_sdg %}
+              <tr>
+                <td>{{ b.currency }}</td>
+                <td>{{ b.balance|floatformat:0|intcomma }}</td>
+                <td>{{ b.sdg_equiv|floatformat:0|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="3" class="text-center text-muted">لا توجد عملات مسجلة.</td>
+              </tr>
+              {% endfor %}
+              <tr class="table-info summary">
+                <td>إجمالي بالجنيه</td>
+                <td></td>
+                <td>{{ balances_total_sdg|floatformat:0|intcomma }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Currency purchase summary -->
+      <div class="card shadow mb-4">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0  text-white">ملخص شراء العملات</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>العملة</th>
+                <th>إجمالي الشراء</th>
+                <th>إجمالي التكلفة بالجنيه</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for p in purchase_summary %}
+              <tr>
+                <td>{{ p.currency__code }}</td>
+                <td>{{ p.total_amount|floatformat:0|default:"0"|intcomma }}</td>
+                <td>{{ p.total_sdg_cost|floatformat:0|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="3" class="text-center text-muted">لا توجد عمليات شراء عملة.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Partner investments and withdrawals -->
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0  text-white">الشركاء</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>الاسم</th>
+                <th>المبالغ المودعة</th>
+                <th>المسحوبات</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for partner in partners %}
+              <tr>
+                <td>{{ partner.full_name }}</td>
+                <td>{{ deposits_per_partner|dict_get:partner.id|floatformat:0|default:"0"|intcomma }}</td>
+                <td>{{ withdrawals_per_partner|dict_get:partner.id|floatformat:0|default:"0"|intcomma }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="3" class="text-center text-muted">لا يوجد شركاء.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Financial logs section for transparency -->
+      <div class="card shadow mt-4">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">سجل العمليات المالية (آخر 50 عملية)</h5>
+        </div>
+        <div class="card-body">
+          <table class="table table-bordered align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>#</th>
+                <th>العملية</th>
+                <th>الوصف</th>
+                <th>المبلغ</th>
+                <th>العملة</th>
+                <th>ما يعادل بالجنيه</th>
+                <th>التاريخ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for log in logs %}
+              <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ log.get_operation_type_display }}</td>
+                <td>{{ log.description }}</td>
+                <td>{{ log.amount|floatformat:0|intcomma }}</td>
+                <td>{% if log.currency %}{{ log.currency.code }}{% else %}-{% endif %}</td>
+                <td>{{ log.sdg_equivalent|floatformat:0|intcomma }}</td>
+                <td>{{ log.timestamp|date:"Y-m-d H:i" }}</td>
+              </tr>
+              {% empty %}
+              <tr>
+                <td colspan="7" class="text-center text-muted">لا توجد عمليات مسجلة.</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
