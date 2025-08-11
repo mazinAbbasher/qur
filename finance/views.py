@@ -1,26 +1,47 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from django.db.models import Sum, Q
+from django.db.models import Sum, Q, F, ExpressionWrapper, DecimalField
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 from reportlab.lib.pagesizes import A4
 from .models import (
-    CompanyBalance, CurrencyPurchase, Partner, PartnerTransaction, Currency, FinancialLog, convert_to_sdg
+     CurrencyExchange, Partner, PartnerTransaction, Currency, FinancialLog, convert_to_sdg
 )
 from django.db import models
 from .forms import PartnerForm, PartnerTransactionForm, CurrencyPurchaseForm
+from panel.models import Shipment, SupplierPayment, Expense, CommissionPayment, InvoicePayment
+from django.views.decorators.http import require_GET
 
 # --- Company Balances and Dashboard ---
-
 def calculate_company_balance(currency):
-    # Sum of all purchases for this currency
-    purchases_sum = CurrencyPurchase.objects.filter(currency=currency).aggregate(total=Sum('amount'))['total'] or 0
-    # Sum of all partner deposits for this currency
+    # Total bought into this currency
+    bought_sum = CurrencyExchange.objects.filter(bought_currency=currency).aggregate(total=Sum('bought_amount'))['total'] or 0
+    # Total sold from this currency
+    sold_sum = CurrencyExchange.objects.filter(sold_currency=currency).aggregate(total=Sum('sold_amount'))['total'] or 0
+
+    # Partner deposits
     deposits_sum = PartnerTransaction.objects.filter(currency=currency, transaction_type='deposit').aggregate(total=Sum('amount'))['total'] or 0
-    # Sum of all partner withdrawals for this currency
+
+    # Partner withdrawals
     withdrawals_sum = PartnerTransaction.objects.filter(currency=currency, transaction_type='withdrawal').aggregate(total=Sum('amount'))['total'] or 0
-    # Company balance = purchases + deposits - withdrawals
-    return purchases_sum + deposits_sum - withdrawals_sum
+
+    # shipments costs
+    if currency.code == 'SDG':
+        shipment_costs = Shipment.objects.all().aggregate(total=Sum('shipment_cost'))['total'] or 0
+        expense_costs = Expense.objects.all().aggregate(total=Sum('amount'))['total'] or 0
+        commission_sum = CommissionPayment.objects.all().aggregate(total=Sum('amount'))['total'] or 0 
+        sale_payments = InvoicePayment.objects.all().aggregate(total=Sum('amount'))['total'] or 0
+    else:
+        expense_costs = 0
+        shipment_costs = 0
+        commission_sum = 0
+        sale_payments = 0
+
+    if currency.code == 'USD':
+        supplier_sum = SupplierPayment.objects.all().aggregate(total=Sum('amount'))['total'] or 0
+    else:
+        supplier_sum = 0
+    return bought_sum + deposits_sum + sale_payments - (sold_sum + withdrawals_sum + shipment_costs + supplier_sum + expense_costs + commission_sum)
 
 def financial_dashboard(request):
     """
@@ -40,66 +61,45 @@ def financial_dashboard(request):
             'sdg_equiv': sdg_equiv
         })
         balances_total_sdg += sdg_equiv
-    purchases = CurrencyPurchase.objects.select_related('currency').all()
-    purchase_summary = purchases.values('currency__code').annotate(
-        total_amount=Sum('amount'),
-        total_sdg_cost=Sum(models.F('amount') * models.F('exchange_rate'))
-    )
-    partners = Partner.objects.all()
-    partner_withdrawals = PartnerTransaction.objects.filter(transaction_type='withdrawal').aggregate(total_withdrawn=Sum('amount'))
-    withdrawals_per_partner = {
-        p.id: PartnerTransaction.objects.filter(partner=p, transaction_type='withdrawal').aggregate(total=Sum('amount'))['total'] or 0
-        for p in partners
-    }
-    # Add: deposits per partner
-    deposits_per_partner = {
-        p.id: PartnerTransaction.objects.filter(partner=p, transaction_type='deposit').aggregate(total=Sum('amount'))['total'] or 0
-        for p in partners
-    }
-    logs = FinancialLog.objects.order_by('-timestamp')[:50]
+    purchases = CurrencyExchange.objects.select_related('bought_currency').all()
+    # purchase_summary = purchases.values('bought_currency__code').annotate(
+    #     total_amount=Sum('bought_amount'),
+    #     total_sdg_cost=Sum(models.F('bought_amount') * models.F('exchange_rate'))
+    # )
+    # partners = Partner.objects.all()
+    # partner_withdrawals = PartnerTransaction.objects.filter(transaction_type='withdrawal').aggregate(total_withdrawn=Sum('amount'))
+    # withdrawals_per_partner = {
+    #     p.id: PartnerTransaction.objects.filter(partner=p, transaction_type='withdrawal').aggregate(total=Sum('amount'))['total'] or 0
+    #     for p in partners
+    # }
+    # # Add: deposits per partner
+    # deposits_per_partner = {
+    #     p.id: PartnerTransaction.objects.filter(partner=p, transaction_type='deposit').aggregate(total=Sum('amount'))['total'] or 0
+    #     for p in partners
+    # }
+    # logs = FinancialLog.objects.order_by('-timestamp')[:50]
     return render(request, 'finance/financial_dashboard.html', {
         'balances_sdg': balances_sdg,
         'balances_total_sdg': balances_total_sdg,
-        'purchase_summary': purchase_summary,
-        'partners': partners,
-        'partner_withdrawals': partner_withdrawals,
-        'withdrawals_per_partner': withdrawals_per_partner,
-        'deposits_per_partner': deposits_per_partner,
-        'show_currency_purchases_link': True,
+        # 'purchase_summary': purchase_summary,
+        # 'partners': partners,
+        # 'partner_withdrawals': partner_withdrawals,
+        # 'withdrawals_per_partner': withdrawals_per_partner,
+        # 'deposits_per_partner': deposits_per_partner,
+        # 'show_currency_purchases_link': True,
         'active_sidebar': 'finance_dashboard',
-        'logs': logs,
+        # 'logs': logs,
     })
 
-def company_balances(request):
-    """
-    View for company balances by currency, with SDG equivalent.
-    Shows all supported currencies, even if no balance record exists yet.
-    """
-    currencies = Currency.objects.all()
-    balances_sdg = []
-    for currency in currencies:
-        # Use reliable calculation
-        balance = calculate_company_balance(currency)
-        sdg_equiv = convert_to_sdg(balance, currency.code)
-        balances_sdg.append({
-            'currency': f"{currency.code} - {currency.name}",
-            'balance': balance,
-            'sdg_equiv': sdg_equiv
-        })
-    return render(request, 'finance/company_balances.html', {
-        'balances_sdg': balances_sdg,
-        'show_currency_purchases_link': True,
-        'active_sidebar': 'company_balances',
-    })
 
-# --- Partner Management ---
 
 def partners_list(request):
     partners = Partner.objects.all()
     # Fetch all balances for all partners and currencies
     partner_balances = {}
     for partner in partners:
-        partner_balances[partner.id] = list(partner.balances.select_related('currency').all())
+        partner_balances[partner.id] = partner.get_all_balances()     
+
     return render(request, 'finance/partners_list.html', {
         'partners': partners,
         'partner_balances': partner_balances,
@@ -138,7 +138,11 @@ def partner_transactions(request, partner_id):
     try:
         partner = Partner.objects.get(pk=partner_id)
         transactions = partner.transactions.select_related('currency').all().order_by('-pk')
-        balances = list(partner.balances.select_related('currency').all())
+        # git the balances with currency by calculating them from partner transactions model
+        balances = list(transactions.values('currency__code').annotate(
+            total_balance=Sum('amount', filter=Q(transaction_type='deposit')) - Sum('amount', filter=Q(transaction_type='withdrawal'))
+        ))
+        # balances = list(partner.balances.select_related('currency').all())
     except Partner.DoesNotExist:
         partner = None
         transactions = []
@@ -215,6 +219,65 @@ def partner_transactions(request, partner_id):
         'active_sidebar': 'partners_list'
     })
 
+@require_GET
+def partner_transactions_pdf(request, partner_id):
+    """
+    Export the current partner transactions as a PDF for sharing/printing.
+    """
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    from datetime import date
+    import io
+
+    partner = get_object_or_404(Partner, pk=partner_id)
+    transactions = partner.transactions.select_related('currency').all().order_by('-pk')
+
+    # Filtering (same as partner_transactions)
+    currency_id = request.GET.get('currency')
+    tx_type = request.GET.get('transaction_type')
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    filtered_transactions = transactions
+    if currency_id:
+        filtered_transactions = filtered_transactions.filter(currency_id=currency_id)
+    if tx_type:
+        filtered_transactions = filtered_transactions.filter(transaction_type=tx_type)
+    if date_from:
+        filtered_transactions = filtered_transactions.filter(date__gte=date_from)
+    if date_to:
+        filtered_transactions = filtered_transactions.filter(date__lte=date_to)
+
+    logo_url = request.build_absolute_uri('/static/logo.png')  # Adjust path as needed
+
+    html_string = render_to_string('suppliers/supplier_transactions_pdf.html', {
+        'partner': partner,
+        'transactions': filtered_transactions,
+        'today': date.today(),
+        'logo_url': logo_url,
+    })
+    pdf_css = """
+    body { font-family: 'Cairo', Arial, sans-serif; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #333; padding: 6px; text-align: left; }
+    th { background: #f8f8f8; }
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
+            output.name,
+            stylesheets=[CSS(string=pdf_css)]
+        )
+        output.seek(0)
+        pdf = output.read()
+    from django.http import FileResponse
+    filename = f"partner_{partner_id}_transactions_{date.today().isoformat()}.pdf"
+    response = FileResponse(
+        io.BytesIO(pdf),
+        as_attachment=True,
+        filename=filename
+    )
+    return response
+
 def transaction_add(request, partner_id):
     partner = get_object_or_404(Partner, pk=partner_id)
     if request.method == 'POST':
@@ -261,9 +324,9 @@ def currency_purchases_list(request):
     currency_id = request.GET.get('currency')
     date_from = request.GET.get('date_from')
     date_to = request.GET.get('date_to')
-    purchases = CurrencyPurchase.objects.select_related('currency').order_by('-date')
+    purchases = CurrencyExchange.objects.select_related('bought_currency').order_by('-pk')
     if currency_id:
-        purchases = purchases.filter(currency_id=currency_id)
+        purchases = purchases.filter(bought_currency__id=currency_id)
     if date_from:
         purchases = purchases.filter(date__gte=date_from)
     if date_to:
@@ -290,8 +353,8 @@ def currency_purchases_list(request):
         ]
         for purchase in purchases:
             data.append([
-                str(purchase.currency.code),
-                f"{int(purchase.amount):,}",
+                str(purchase.bought_currency.code),
+                f"{int(purchase.bought_amount):,}",
                 f"{int(purchase.exchange_rate):,}",
                 purchase.date.strftime('%Y-%m-%d'),
                 (purchase.note or '')[:80]
@@ -326,6 +389,20 @@ def currency_purchase_add(request):
     if request.method == 'POST':
         form = CurrencyPurchaseForm(request.POST)
         if form.is_valid():
+            # ensure sold amount is existed in the company balances
+            sold_currency = form.cleaned_data['sold_currency']
+            sold_amount = form.cleaned_data['sold_amount']
+            if sold_currency and sold_amount:
+                balance = calculate_company_balance(sold_currency)
+                if balance < sold_amount:
+                    form.add_error('sold_amount', f"Insufficient balance for {sold_currency.code}. Available: {balance}")
+                    return render(request, 'finance/currency_purchase_form.html', {'form': form, 'active_sidebar': 'currency_purchases'})
+            # calculate exchange rate
+            bought_currency = form.cleaned_data['bought_currency']
+            bought_amount = form.cleaned_data['bought_amount']
+            if bought_currency and bought_amount and sold_currency and sold_amount:
+                exchange_rate =  sold_amount /  bought_amount
+                form.instance.exchange_rate = exchange_rate
             form.save()
             return redirect('currency_purchases_list')
     else:
@@ -333,7 +410,7 @@ def currency_purchase_add(request):
     return render(request, 'finance/currency_purchase_form.html', {'form': form, 'active_sidebar': 'currency_purchases'})
 
 def currency_purchase_edit(request, purchase_id):
-    purchase = get_object_or_404(CurrencyPurchase, pk=purchase_id)
+    purchase = get_object_or_404(CurrencyExchange, pk=purchase_id)
     if request.method == 'POST':
         form = CurrencyPurchaseForm(request.POST, instance=purchase)
         if form.is_valid():
@@ -344,7 +421,7 @@ def currency_purchase_edit(request, purchase_id):
     return render(request, 'finance/currency_purchase_form.html', {'form': form, 'purchase': purchase, 'active_sidebar': 'currency_purchases'})
 
 def currency_purchase_delete(request, purchase_id):
-    purchase = get_object_or_404(CurrencyPurchase, pk=purchase_id)
+    purchase = get_object_or_404(CurrencyExchange, pk=purchase_id)
     if request.method == 'POST':
         purchase.delete()
         return redirect('currency_purchases_list')

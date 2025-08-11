@@ -11,10 +11,17 @@
             <i class="bi bi-plus-circle"></i> فاتورة جديدة
           </a>
         </div>
+        {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
         <div class="card-body">
           <!-- Download & Share PDF Button -->
           <div class="mb-3 d-flex justify-content-end">
-            <a href="{% url 'panel:sale_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" target="_blank">
+            <a href="{% url 'panel:sale_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" >
               <i class="bi bi-file-earmark-pdf"></i> تحميل  PDF
             </a>
           </div>
@@ -74,8 +81,8 @@
                   <th class="px-4 py-2 text-right font-bold">المندوب</th>
                   <th class="px-4 py-2 text-right font-bold">التاريخ</th>
                   <th class="px-4 py-2 text-right font-bold">الإجمالي</th>
-                  {% comment %} <th class="px-4 py-2 text-right font-bold">المدفوع</th>
-                  <th class="px-4 py-2 text-right font-bold">المتبقي</th> {% endcomment %}
+                  {% comment %} <th class="px-4 py-2 text-right font-bold">المدفوع</th> {% endcomment %}
+                  <th class="px-4 py-2 text-right font-bold">المتبقي</th>
                   <th class="px-4 py-2 text-right font-bold">الحالة</th>
                   <th class="px-4 py-2 text-right font-bold">تفاصيل</th>
                 </tr>
@@ -102,7 +109,7 @@
                     {% endif %}
                   </td>
                   <td class="px-4 py-2">{{ sale.created_at|date:"Y-m-d H:i" }}</td>
-                  <td class="px-4 py-2"><span class="text-success fw-bold">{{ sale.total|floatformat:2|intcomma }}</span></td>
+                  <td class="px-4 py-2"><span class="text-success fw-bold">{{ sale.total|floatformat:0|intcomma }}</span></td>
                   {% with invoice=sale.invoice %}
                   {% comment %} <td class="px-4 py-2">
                     {% if invoice %}
@@ -110,16 +117,16 @@
                     {% else %}
                       <span class="text-muted">-</span>
                     {% endif %}
-                  </td>
+                  </td> {% endcomment %}
                   <td class="px-4 py-2">
                     {% if invoice %}
                       <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success fw-bold{% endif %}">
-                        {{ invoice.remaining_amount|floatformat:2|intcomma }}
+                        {{ invoice.remaining_amount|floatformat:0|intcomma }}
                       </span>
                     {% else %}
                       <span class="text-muted">-</span>
                     {% endif %}
-                  </td> {% endcomment %}
+                  </td>
                   <td class="px-4 py-2">
                     {% if invoice %}
                       <span class="badge 

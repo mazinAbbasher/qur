@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Expense List</title>
+    <title>Partner Transactions</title>
     <style>
         body { font-family: Arial, sans-serif; color: #222; background: #fff; margin: 0; padding: 0; }
         .invoice-container { max-width: 700px; margin: 40px auto; background: #fff; border: 1px solid #ddd; padding: 0 0 24px 0; }
@@ -34,8 +34,8 @@
                 <div class="company-name">Equarorial medical Ltd</div>
             </div>
             <div class="title-block">
-                <div class="title">Expense List</div>
-                <div class="subtitle">Company Expenses Report</div>
+                <div class="title">Partner Transactions</div>
+                <div class="subtitle">Financial Transactions for Partner: {{ partner.full_name }}</div>
                 <div class="date">Date: {{ today }}</div>
             </div>
         </div>
@@ -43,23 +43,25 @@
             <table>
                 <thead>
                     <tr>
-                        <th>Description</th>
-                        {% comment %} <th>Category</th> {% endcomment %}
+                        <th>Type</th>
                         <th>Amount</th>
+                        <th>Currency</th>
                         <th>Date</th>
+                        <th>Note</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for expense in expenses %}
+                    {% for tx in transactions %}
                     <tr>
-                        <td>{{ expense.description|default:"—" }}</td>
-                        {% comment %} <td>{{ expense.get_category_display|default:"—" }}</td> {% endcomment %}
-                        <td>{{ expense.amount|floatformat:2 }}</td>
-                        <td>{{ expense.date|date:"Y-m-d" }}</td>
+                        <td>{{ tx.get_transaction_type_display }}</td>
+                        <td>{{ tx.amount|floatformat:2 }}</td>
+                        <td>{{ tx.currency.code }}</td>
+                        <td>{{ tx.date|date:"Y-m-d" }}</td>
+                        <td>{{ tx.note|default:"—" }}</td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="4" style="text-align:center;color:#bbb;">No expenses found.</td>
+                        <td colspan="5" style="text-align:center;color:#bbb;">No partner transactions found.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

@@ -79,11 +79,11 @@
                       <h6 class="text-info mb-1"><i class="fas fa-map-marker-alt me-1"></i> العنوان</h6>
                       <div class="fw-semibold fs-5">
                           {% if appointment.latitude and appointment.longitude %}
-                              <a href="https://maps.google.com/?q={{ appointment.latitude }},{{ appointment.longitude }}" target="_blank" class="text-decoration-underline text-info">
+                              <a href="https://maps.google.com/?q={{ appointment.latitude }},{{ appointment.longitude }}"  class="text-decoration-underline text-info">
                                   {{ appointment.address }}
                               </a>
                           {% else %}
-                              <a href="https://maps.google.com/?q={{ appointment.address|urlencode }}" target="_blank" class="text-decoration-underline text-info">
+                              <a href="https://maps.google.com/?q={{ appointment.address|urlencode }}"  class="text-decoration-underline text-info">
                                   {{ appointment.address }}
                               </a>
                           {% endif %}

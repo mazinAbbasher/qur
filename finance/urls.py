@@ -4,7 +4,7 @@ from . import views
 urlpatterns = [
     # Financial Dashboard and Company Balances
     path('dashboard/', views.financial_dashboard, name='financial_dashboard'),
-    path('balances/', views.company_balances, name='company_balances'),
+    # path('balances/', views.company_balances, name='company_balances'),
 
     # Partner Management
     path('partners/', views.partners_list, name='partners_list'),
@@ -13,8 +13,9 @@ urlpatterns = [
     path('partners/<int:partner_id>/delete/', views.partner_delete, name='partner_delete'),
     path('partners/<int:partner_id>/transactions/', views.partner_transactions, name='partner_transactions'),
     path('partners/<int:partner_id>/transactions/add/', views.transaction_add, name='transaction_add'),
-    path('transactions/<int:tx_id>/edit/', views.transaction_edit, name='transaction_edit'),
-    path('transactions/<int:tx_id>/delete/', views.transaction_delete, name='transaction_delete'),
+    path('partners/<int:tx_id>/edit/', views.transaction_edit, name='transaction_edit'),
+    path('partners/<int:tx_id>/delete/', views.transaction_delete, name='transaction_delete'),
+    path('partners/<int:partner_id>/transactions/pdf/', views.partner_transactions_pdf, name='partner_transactions_pdf'),
 
     # Currency Purchases
     path('currency-purchases/', views.currency_purchases_list, name='currency_purchases_list'),

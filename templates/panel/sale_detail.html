@@ -160,7 +160,7 @@
             {% endif %}
           </p>
           {% if invoice.file_path %}
-            <p><a href="{{ invoice.file_path }}" target="_blank" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> تحميل الفاتورة</a></p>
+            <p><a href="{{ invoice.file_path }}"  class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> تحميل الفاتورة</a></p>
           {% endif %}
           {% if invoice.payments.exists %}
             <div class="mt-4">
@@ -209,7 +209,7 @@
             </div>
           {% endif %}
           <div class="mt-4">
-            <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" target="_blank">
+            <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" >
               تحميل PDF
             </a>
           </div>

@@ -3,6 +3,10 @@ from django.utils import timezone
 from decimal import Decimal
 from django.contrib import admin
 from django.core.exceptions import ValidationError
+ 
+from django.db.models.functions import Coalesce
+from django.db.models import Sum, Q, F, ExpressionWrapper, DecimalField
+
 
 class Currency(models.Model):
     """
@@ -46,38 +50,28 @@ class FinancialLog(models.Model):
     def __str__(self):
         return f"{self.get_operation_type_display()} {self.amount} {self.currency} at {self.timestamp}"
 
-class CurrencyPurchase(models.Model):
-    """
-    Records a currency purchase operation.
-    """
-    currency = models.ForeignKey(Currency, on_delete=models.CASCADE)
-    amount = models.DecimalField(max_digits=16, decimal_places=2)
-    exchange_rate = models.DecimalField(max_digits=16, decimal_places=4)  # against SDG
+class CurrencyExchange(models.Model):
+    sold_currency = models.ForeignKey(Currency, on_delete=models.CASCADE, related_name='exchanges_as_sold')
+    bought_currency = models.ForeignKey(Currency, on_delete=models.CASCADE, related_name='exchanges_as_bought')
+    sold_amount = models.DecimalField(max_digits=16, decimal_places=2)
+    bought_amount = models.DecimalField(max_digits=16, decimal_places=2)
+    exchange_rate = models.DecimalField(max_digits=16, decimal_places=4)  # Optional: bought / sold
     date = models.DateField(default=timezone.now)
     note = models.CharField(max_length=255, blank=True, null=True)
 
     def clean(self):
-        if self.amount < 0:
-            raise ValidationError("Amount cannot be negative.")
-        if self.exchange_rate <= 0:
-            raise ValidationError("Exchange rate must be positive.")
+        if self.sold_amount <= 0 or self.bought_amount <= 0:
+            raise ValidationError("Amounts must be positive.")
+        if self.sold_currency == self.bought_currency:
+            raise ValidationError("Currencies must be different.")
+    
+    # def save(self, *args, **kwargs):
+    #     # if not self.exchange_rate:
+    #     self.exchange_rate = self.bought_amount / self.sold_amount
+    #     super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Purchase {self.amount} {self.currency.code} @ {self.exchange_rate} SDG"
-
-class CompanyBalance(models.Model):
-    """
-    Tracks the company's balance per currency.
-    """
-    currency = models.OneToOneField(Currency, on_delete=models.CASCADE)
-    balance = models.DecimalField(max_digits=16, decimal_places=2, default=0)
-
-    def __str__(self):
-        return f"{self.currency.code} Balance: {self.balance}"
-
-    def update_balance(self, amount):
-        self.balance = max((self.balance or Decimal('0')) + Decimal(amount), Decimal('0'))
-        self.save(update_fields=['balance'])
+        return f"{self.sold_amount} {self.sold_currency.code} → {self.bought_amount} {self.bought_currency.code} @ {self.exchange_rate:.4f}"
 
 class Partner(models.Model):
     """
@@ -88,30 +82,32 @@ class Partner(models.Model):
     def __str__(self):
         return f"{self.full_name}"
 
-    def get_balance(self, currency):
-        pb = self.balances.filter(currency=currency).first()
-        return pb.balance if pb else Decimal('0')
+    # def get_balance(self, currency):
+    #     pb = self.balances.filter(currency=currency).first()
+    #     return pb.balance if pb else Decimal('0')
 
+       
     def get_all_balances(self):
-        return {pb.currency.code: pb.balance for pb in self.balances.all()}
+        """
+        Returns the partner's balances in all currencies, including SDG equivalent.
+        """
+        balances = self.transactions.values('currency__code', 'currency__name').annotate(
+            total_deposit=Coalesce(Sum('amount', filter=Q(transaction_type='deposit')), Decimal('0')),
+            total_withdrawal=Coalesce(Sum('amount', filter=Q(transaction_type='withdrawal')), Decimal('0')),
+        ).annotate(
+            balance=ExpressionWrapper(
+                F('total_deposit') - F('total_withdrawal'),
+                output_field=DecimalField(max_digits=16, decimal_places=2)
+            )
+        ).order_by('currency__code')
 
-class PartnerBalance(models.Model):
-    """
-    Tracks the partner's balance per currency.
-    """
-    partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name='balances')
-    currency = models.ForeignKey(Currency, on_delete=models.CASCADE)
-    balance = models.DecimalField(max_digits=16, decimal_places=2, default=0)
+        # Add SDG equivalent
+        for b in balances:
+            code = b['currency__code']
+            b['sdg_equivalent'] = Decimal(convert_to_sdg(b['balance'], code))
 
-    class Meta:
-        unique_together = ('partner', 'currency')
+        return balances
 
-    def __str__(self):
-        return f"{self.partner.full_name} - {self.currency.code}: {self.balance}"
-
-    def update_balance(self, amount):
-        self.balance = max((self.balance or Decimal('0')) + Decimal(amount), Decimal('0'))
-        self.save(update_fields=['balance'])
 
 class PartnerTransaction(models.Model):
     """
@@ -131,32 +127,36 @@ class PartnerTransaction(models.Model):
     def clean(self):
         if self.amount < 0:
             raise ValidationError("Transaction amount cannot be negative.")
+  
 
-    def save(self, *args, **kwargs):
-        # Withdrawal reliability: check balance at save time
-        if self.transaction_type == 'withdrawal':
-            pb = PartnerBalance.objects.filter(partner=self.partner, currency=self.currency).first()
-            current_balance = pb.balance if pb else Decimal('0')
-            if self.amount > current_balance:
-                raise ValidationError(f"Withdrawal amount ({self.amount}) exceeds available balance ({current_balance}) for {self.currency.code}.")
-        super().save(*args, **kwargs)
+    # def save(self, *args, **kwargs):
+    #     # Withdrawal reliability: check balance at save time
+    #     if self.transaction_type == 'withdrawal':
+    #         pb = PartnerBalance.objects.filter(partner=self.partner, currency=self.currency).first()
+    #         current_balance = pb.balance if pb else Decimal('0')
+    #         if self.amount > current_balance:
+    #             raise ValidationError(f"Withdrawal amount ({self.amount}) exceeds available balance ({current_balance}) for {self.currency.code}.")
+    #     super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.transaction_type.title()} {self.amount} {self.currency.code} for {self.partner.full_name}"
 
-def get_latest_exchange_rate(currency_code):
-    """
-    Returns the latest exchange rate for a currency from CurrencyPurchase records.
-    """
-    latest = CurrencyPurchase.objects.filter(currency__code=currency_code).order_by('-date').first()
-    if latest and latest.exchange_rate > 0:
+def get_latest_exchange_rate(to_currency):
+    latest = CurrencyExchange.objects.filter(
+        sold_currency__code="SDG",
+        bought_currency__code=to_currency
+    ).order_by('-date').first()
+
+    if latest:
         return float(latest.exchange_rate)
-    # Fallback rates
-    if currency_code == 'USD':
+
+    # fallback rates
+    if to_currency == 'USD':
         return 2550
-    elif currency_code == 'AED':
+    elif to_currency == 'AED':
         return 700
     return 1
+
 
 def convert_to_sdg(amount, currency_code):
     rate = get_latest_exchange_rate(currency_code)
@@ -164,116 +164,3 @@ def convert_to_sdg(amount, currency_code):
         return float(amount) * rate if amount is not None else 0
     except Exception:
         return 0
-
-def smart_alert(message):
-    # Placeholder for real alerting (email, SMS, etc.)
-    print(f"[ALERT] {message}")
-
-# Signals to update balances atomically and log every operation
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
-
-@receiver(post_save, sender=CurrencyPurchase)
-def update_balances_on_purchase(sender, instance, created, **kwargs):
-    with transaction.atomic():
-        cb, _ = CompanyBalance.objects.get_or_create(currency=instance.currency)
-        cb.update_balance(instance.amount)
-        # Deduct SDG equivalent from SDG balance if not SDG
-        if instance.currency.code != 'SDG':
-            sdg_currency = Currency.objects.get(code='SDG')
-            sdg_cb, _ = CompanyBalance.objects.get_or_create(currency=sdg_currency)
-            sdg_equiv = Decimal(instance.amount) * Decimal(instance.exchange_rate)
-            sdg_cb.update_balance(-sdg_equiv)
-        # Log operation
-        FinancialLog.objects.create(
-            operation_type='currency_purchase',
-            related_id=instance.id,
-            description=f"Purchased {instance.amount} {instance.currency.code} @ {instance.exchange_rate} SDG",
-            amount=instance.amount,
-            currency=instance.currency,
-            sdg_equivalent=Decimal(instance.amount) * Decimal(instance.exchange_rate),
-            extra_data={'note': instance.note}
-        )
-        smart_alert(f"Currency purchase: {instance.amount} {instance.currency.code} @ {instance.exchange_rate} SDG")
-
-@receiver(post_delete, sender=CurrencyPurchase)
-def revert_balances_on_purchase_delete(sender, instance, **kwargs):
-    with transaction.atomic():
-        cb = CompanyBalance.objects.filter(currency=instance.currency).first()
-        if cb:
-            cb.update_balance(-instance.amount)
-        if instance.currency.code != 'SDG':
-            sdg_currency = Currency.objects.get(code='SDG')
-            sdg_cb = CompanyBalance.objects.filter(currency=sdg_currency).first()
-            if sdg_cb:
-                sdg_equiv = Decimal(instance.amount) * Decimal(instance.exchange_rate)
-                sdg_cb.update_balance(sdg_equiv)
-        FinancialLog.objects.create(
-            operation_type='balance_adjustment',
-            related_id=instance.id,
-            description=f"Reverted purchase of {instance.amount} {instance.currency.code}",
-            amount=-instance.amount,
-            currency=instance.currency,
-            sdg_equivalent=-(Decimal(instance.amount) * Decimal(instance.exchange_rate)),
-            extra_data={'note': instance.note}
-        )
-        smart_alert(f"Currency purchase deleted: {instance.amount} {instance.currency.code}")
-
-@receiver(post_save, sender=PartnerTransaction)
-def update_partner_and_account_on_transaction(sender, instance, created, **kwargs):
-    if created:
-        with transaction.atomic():
-            pb, _ = PartnerBalance.objects.get_or_create(partner=instance.partner, currency=instance.currency)
-            if instance.transaction_type == 'deposit':
-                pb.update_balance(instance.amount)
-                FinancialLog.objects.create(
-                    operation_type='partner_deposit',
-                    related_id=instance.id,
-                    description=f"Partner {instance.partner.full_name} deposit {instance.amount} {instance.currency.code}",
-                    amount=instance.amount,
-                    currency=instance.currency,
-                    sdg_equivalent=Decimal(convert_to_sdg(instance.amount, instance.currency.code)),
-                    extra_data={'note': instance.note, 'partner_id': instance.partner.id}
-                )
-                smart_alert(f"Partner deposit: {instance.partner.full_name} {instance.amount} {instance.currency.code}")
-            elif instance.transaction_type == 'withdrawal':
-                pb.update_balance(-instance.amount)
-                FinancialLog.objects.create(
-                    operation_type='partner_withdrawal',
-                    related_id=instance.id,
-                    description=f"Partner {instance.partner.full_name} withdrawal {instance.amount} {instance.currency.code}",
-                    amount=-instance.amount,
-                    currency=instance.currency,
-                    sdg_equivalent=-Decimal(convert_to_sdg(instance.amount, instance.currency.code)),
-                    extra_data={'note': instance.note, 'partner_id': instance.partner.id}
-                )
-                smart_alert(f"Partner withdrawal: {instance.partner.full_name} {instance.amount} {instance.currency.code}")
-
-@receiver(post_delete, sender=PartnerTransaction)
-def revert_partner_and_account_on_transaction_delete(sender, instance, **kwargs):
-    with transaction.atomic():
-        pb, _ = PartnerBalance.objects.get_or_create(partner=instance.partner, currency=instance.currency)
-        if instance.transaction_type == 'deposit':
-            pb.update_balance(-instance.amount)
-            FinancialLog.objects.create(
-                operation_type='balance_adjustment',
-                related_id=instance.id,
-                description=f"Reverted partner deposit {instance.amount} {instance.currency.code}",
-                amount=-instance.amount,
-                currency=instance.currency,
-                sdg_equivalent=-Decimal(convert_to_sdg(instance.amount, instance.currency.code)),
-                extra_data={'note': instance.note, 'partner_id': instance.partner.id}
-            )
-            smart_alert(f"Partner deposit deleted: {instance.partner.full_name} {instance.amount} {instance.currency.code}")
-        elif instance.transaction_type == 'withdrawal':
-            pb.update_balance(instance.amount)
-            FinancialLog.objects.create(
-                operation_type='balance_adjustment',
-                related_id=instance.id,
-                description=f"Reverted partner withdrawal {instance.amount} {instance.currency.code}",
-                amount=instance.amount,
-                currency=instance.currency,
-                sdg_equivalent=Decimal(convert_to_sdg(instance.amount, instance.currency.code)),
-                extra_data={'note': instance.note, 'partner_id': instance.partner.id}
-            )
-            smart_alert(f"Partner withdrawal deleted: {instance.partner.full_name} {instance.amount} {instance.currency.code}")

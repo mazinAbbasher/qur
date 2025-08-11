@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-{% load humanize %}
+{% load humanize dict_extras %}
+
+
 
 <!-- Partner management: registration, withdrawals, deposits, edit, delete -->
 <div class="container py-4">
@@ -32,16 +34,32 @@
           {% for partner in partners %}
           <tr>
             <td>{{ partner.full_name }}</td>
+            {% comment %} <td>{{ partner_balances[1] }}</td> {% endcomment %}
             {% comment %} <td>{{ partner.currency.code }}</td>
             <td>{{ partner.amount_invested }}</td>
             <td>{{ partner.ownership_percentage }}</td> {% endcomment %}
+            
             <td>
-              {% for pb in partner.balances.all %}
-                <span class="badge bg-primary">{{ pb.currency.code }}: {{ pb.balance|floatformat:0|intcomma }}</span>
-              {% empty %}
-                <span class="text-muted">لا يوجد أرصدة</span>
-              {% endfor %}
-            </td>            <td>
+              {% with balances=partner_balances|dict_get:partner.id %}
+                {% if balances %}
+                  {% for b in balances %}
+                    {% if b.balance %}
+                      <span class="badge bg-primary">
+                        {{ b.currency__code }}: {{ b.balance|floatformat:0|intcomma }}
+                      </span>
+                    {% else %}
+                      <span class="badge bg-secondary">
+                        {{ b.currency__code }}: 0 
+                      </span>
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="text-muted">لا يوجد أرصدة</span>
+                {% endif %}
+              {% endwith %}
+            </td>
+            
+            <td>
               <a href="{% url 'partner_transactions' partner.id %}" class="btn btn-primary btn-sm" title="عرض العمليات المالية">عرض العمليات</a>
               <a href="{% url 'transaction_add' partner.id %}" class="btn btn-success btn-sm" title="إضافة عملية مالية">إضافة عملية</a>
             </td>

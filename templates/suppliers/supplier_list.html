@@ -8,7 +8,7 @@
   </div>
   <!-- Download & Share PDF Button -->
   <div class="mb-3 d-flex justify-content-end">
-    <a href="{% url 'panel:supplier_list_pdf' %}" class="btn btn-outline-primary" target="_blank">
+    <a href="{% url 'panel:supplier_list_pdf' %}" class="btn btn-outline-primary" >
       <i class="bi bi-file-earmark-pdf"></i> تحميل  PDF
     </a>
   </div>
@@ -41,7 +41,7 @@
             <td>{{ supplier.address|default:"-" }}</td>
             <td>
               <span class="{% if supplier.balance > 0 %}text-danger{% else %}text-success{% endif %}">
-                {{ supplier.balance|floatformat:2|intcomma }} SDG
+                {{ supplier.balance|floatformat:2|intcomma }} USD
               </span>
             </td>
             <td>

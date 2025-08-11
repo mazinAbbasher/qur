@@ -1,5 +1,5 @@
 from django import forms
-from .models import Partner, PartnerTransaction, CurrencyPurchase
+from .models import Partner, PartnerTransaction, CurrencyExchange
 
 class PartnerForm(forms.ModelForm):
     class Meta:
@@ -16,9 +16,17 @@ class PartnerTransactionForm(forms.ModelForm):
 
 class CurrencyPurchaseForm(forms.ModelForm):
     class Meta:
-        model = CurrencyPurchase
-        fields = ['currency', 'amount', 'exchange_rate', 'date', 'note']
+        model = CurrencyExchange
+        fields = ['bought_currency', 'bought_amount','sold_currency',  'sold_amount', 'date', 'note']
         widgets = {
             'currency': forms.Select(attrs={'class': 'form-select'}),
             'date': forms.DateInput(attrs={'type': 'date'}),
+        }
+        labels = {
+            'sold_currency': 'العملة_المصدرة',
+            'bought_currency': 'العملة_الواردة',
+            'sold_amount': 'المبلغ_المصدر بالكامل',
+            'bought_amount': 'المبلغ_الوارد بالكامل',
+            'date': 'التاريخ',
+            'note': 'ملاحظة',
         }

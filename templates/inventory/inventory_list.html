@@ -11,7 +11,7 @@
         <div class="card-body">
           <!-- Download & Share PDF Button -->
           <div class="mb-3 d-flex justify-content-end">
-            <a href="{% url 'panel:inventory_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" target="_blank">
+            <a href="{% url 'panel:inventory_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" >
               <i class="bi bi-file-earmark-pdf"></i> تحميل  PDF
             </a>
           </div>

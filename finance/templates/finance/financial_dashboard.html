@@ -5,7 +5,7 @@
 <div class="container py-4">
   <div class="row mb-3">
     <div class="col-md-8">
-      <h4 class="mb-0">لوحة التحكم المالية</h4>
+      <h4 class="mb-0">أرصدة الشركة</h4>
       {% comment %} <p class="text-muted mt-2">
         عرض شامل لأرصدة الشركة، ملخص شراء العملات، واستثمارات وسحوبات الشركاء.<br>
         جميع البيانات مترابطة ويمكن إدارتها من هنا.
@@ -31,7 +31,7 @@
               <tr>
                 <th>العملة</th>
                 <th>الرصيد</th>
-                <th>ما يعادل بالجنيه <span title="حسب سعر الصرف المسجل">🛈</span></th>
+                <th>ما يعادل بالجنيه </th>
               </tr>
             </thead>
             <tbody>
@@ -56,7 +56,7 @@
         </div>
       </div>
       <!-- Currency purchase summary -->
-      <div class="card shadow mb-4">
+      {% comment %} <div class="card shadow mb-4">
         <div class="card-header bg-info text-white">
           <h5 class="mb-0  text-white">ملخص شراء العملات</h5>
         </div>
@@ -72,21 +72,21 @@
             <tbody>
               {% for p in purchase_summary %}
               <tr>
-                <td>{{ p.currency__code }}</td>
+                <td>{{ p.bought_currency__code }}</td>
                 <td>{{ p.total_amount|floatformat:0|default:"0"|intcomma }}</td>
                 <td>{{ p.total_sdg_cost|floatformat:0|intcomma }}</td>
               </tr>
               {% empty %}
               <tr>
-                <td colspan="3" class="text-center text-muted">لا توجد عمليات شراء عملة.</td>
+                <td colspan="3" class="text-center text-muted">لا توجد عمليات تبديل عملة.</td>
               </tr>
               {% endfor %}
             </tbody>
           </table>
         </div>
-      </div>
+      </div> {% endcomment %}
       <!-- Partner investments and withdrawals -->
-      <div class="card shadow">
+      {% comment %} <div class="card shadow">
         <div class="card-header bg-info text-white">
           <h5 class="mb-0  text-white">الشركاء</h5>
         </div>
@@ -114,9 +114,9 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </div> {% endcomment %}
       <!-- Financial logs section for transparency -->
-      <div class="card shadow mt-4">
+      {% comment %} <div class="card shadow mt-4">
         <div class="card-header bg-info text-white">
           <h5 class="mb-0 text-white">سجل العمليات المالية (آخر 50 عملية)</h5>
         </div>
@@ -152,7 +152,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </div> {% endcomment %}
     </div>
   </div>
 </div>

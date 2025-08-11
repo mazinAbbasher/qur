@@ -8,7 +8,7 @@
       <h4 class="mb-0">سجل شراء العملات</h4>
     </div>
     <div class="col-md-4 text-end">
-      <a href="{% url 'currency_purchase_add' %}" class="btn btn-success">إضافة عملية شراء عملة</a>
+      <a href="{% url 'currency_purchase_add' %}" class="btn btn-success">إضافة عملية تبديل عملة</a>
     </div>
   </div>
   <div class="card shadow mb-3">
@@ -53,8 +53,10 @@
       <table class="table table-bordered align-middle">
         <thead class="table-light">
           <tr>
-            <th>العملة</th>
-            <th>المبلغ</th>
+            <th>العملة الواردة</th>
+            <th>المبلغ الوارد</th>
+            <th>العملة المصدرة</th>
+            <th>المبلغ المصدر</th>
             <th>سعر الصرف</th>
             <th>التاريخ</th>
             <th>ملاحظة</th>
@@ -64,19 +66,21 @@
         <tbody>
           {% for purchase in purchases %}
           <tr>
-            <td>{{ purchase.currency.code }}</td>
-            <td>{{ purchase.amount|floatformat:0|intcomma }}</td>
-            <td>{{ purchase.exchange_rate|floatformat:0|intcomma }}</td>
+            <td>{{ purchase.bought_currency.code }}</td>
+            <td>{{ purchase.bought_amount|floatformat:2|intcomma }}</td>
+            <td>{{ purchase.sold_currency.code }}</td>
+            <td>{{ purchase.sold_amount|floatformat:2|intcomma }}</td>
+            <td>{{ purchase.exchange_rate|floatformat:2|intcomma }}</td>
             <td>{{ purchase.date }}</td>
             <td>{{ purchase.note }}</td>
             <td>
               <a href="{% url 'currency_purchase_edit' purchase.id %}" class="btn btn-warning btn-sm">تعديل</a>
-              <a href="{% url 'currency_purchase_delete' purchase.id %}" class="btn btn-danger btn-sm" onclick="return confirm('هل أنت متأكد من حذف عملية الشراء؟');">حذف</a>
+              <a href="{% url 'currency_purchase_delete' purchase.id %}" class="btn btn-danger btn-sm" >حذف</a>
             </td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="6" class="text-center text-muted">لا توجد عمليات شراء عملة.</td>
+            <td colspan="6" class="text-center text-muted">لا توجد عمليات تبديل عملة.</td>
           </tr>
           {% endfor %}
         </tbody>

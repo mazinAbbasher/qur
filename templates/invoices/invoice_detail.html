@@ -154,7 +154,7 @@
             </span>
             {% if not pdf_mode %}
             <div>
-              <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" target="_blank">
+              <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" >
                 تحميل PDF
               </a>
               {% if invoice.status != 'paid' %}

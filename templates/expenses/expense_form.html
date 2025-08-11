@@ -10,15 +10,24 @@
             {% if expense %}تعديل مصروف{% else %}إضافة مصروف جديد{% endif %}
           </h5>
         </div>
+        {% if messages %}
+<div class="container mt-3">
+  <ul class="messages">
+    {% for message in messages %}
+      <li class="alert alert-{{ message.tags }}">{{ message }}</li> 
+      {% endfor %}
+  </ul>
+</div>
+{% endif %}
         <div class="card-body">
           <form method="post" novalidate>
             {% csrf_token %}
             <div class="mb-3">
               {{ form.description|as_crispy_field }}
             </div>
-            <div class="mb-3">
+            {% comment %} <div class="mb-3">
               {{ form.category|as_crispy_field }}
-            </div>
+            </div> {% endcomment %}
             <div class="mb-3">
               {{ form.amount|as_crispy_field }}
             </div>

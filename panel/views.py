@@ -22,6 +22,8 @@ from datetime import datetime, date
 from django.http import FileResponse
 import io
 from calendar import monthrange
+from finance.models import CurrencyExchange, Currency, get_latest_exchange_rate
+from finance.views import calculate_company_balance
 
 @register.filter
 def get_item(dictionary, key):
@@ -48,23 +50,36 @@ def index(request):
     total_purchases = sum(
         (s.shipment_cost + (s.cost_sdg * s.quantity)) for s in shipments
     )
-    net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
+    # --- Inventory value calculation ---
+    from .models import Inventory
+    inventory_value = 0
+    inventories = Inventory.objects.select_related('shipment', 'product').all()
+    for inv in inventories:
+        shipment = inv.shipment
+        product = inv.product
+        # Calculate sale price in SDG for this inventory
+        if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
+            sale_price_sdg = shipment.cost_sdg
+            inventory_value += inv.quantity * sale_price_sdg
+    # --- End inventory value calculation ---
+
+    net_profit = total_sales + inventory_value - (total_purchases + total_expenses + total_commissions)
     # Current month summary
-    first_of_month = today.replace(day=1)
-    month_sales = Sale.objects.filter(created_at__date__gte=first_of_month)
-    month_expenses = Expense.objects.filter(date__gte=first_of_month)
-    month_commissions = Commission.objects.filter(created_at__date__gte=first_of_month)
-    month_shipments = Shipment.objects.filter(received_at__date__gte=first_of_month)
-    month_total_sales = month_sales.aggregate(total=Sum('total'))['total'] or Decimal('0')
-    month_total_expenses = month_expenses.aggregate(total=Sum('amount'))['total'] or Decimal('0')
-    month_total_commissions = month_commissions.aggregate(total=Sum('amount'))['total'] or Decimal('0')  # <-- fix here
-    month_total_purchases = sum(
-        (s.shipment_cost + (s.cost_sdg * s.quantity)) for s in month_shipments
-    )
-    month_net_profit = month_total_sales - (month_total_purchases + month_total_expenses + month_total_commissions)
+    # first_of_month = today.replace(day=1)
+    # month_sales = Sale.objects.filter(created_at__date__gte=first_of_month)
+    # month_expenses = Expense.objects.filter(date__gte=first_of_month)
+    # month_commissions = Commission.objects.filter(created_at__date__gte=first_of_month)
+    # month_shipments = Shipment.objects.filter(received_at__date__gte=first_of_month)
+    # month_total_sales = month_sales.aggregate(total=Sum('total'))['total'] or Decimal('0')
+    # month_total_expenses = month_expenses.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+    # month_total_commissions = month_commissions.aggregate(total=Sum('amount'))['total'] or Decimal('0')  # <-- fix here
+    # month_total_purchases = sum(
+    #     (s.shipment_cost + (s.cost_sdg * s.quantity)) for s in month_shipments
+    # )
+    # month_net_profit = month_total_sales - (month_total_purchases + month_total_expenses + month_total_commissions)
     # Recent sales and expenses
-    recent_sales = Sale.objects.select_related('client').order_by('-created_at')[:5]
-    recent_expenses = Expense.objects.order_by('-date')[:5]
+    # recent_sales = Sale.objects.select_related('client').order_by('-created_at')[:5]
+    # recent_expenses = Expense.objects.order_by('-date')[:5]
     # Upcoming due invoices
     upcoming_due_invoices = Invoice.objects.filter(
         due_date__gte=today,
@@ -76,10 +91,10 @@ def index(request):
         "net_profit": net_profit,
         "outstanding_invoices": outstanding_invoices,
         "upcoming_due_invoices": upcoming_due_invoices,
-        "month_total_sales": month_total_sales,
-        "month_net_profit": month_net_profit,
-        "recent_sales": recent_sales,
-        "recent_expenses": recent_expenses,
+        # "month_total_sales": month_total_sales,
+        # "month_net_profit": month_net_profit,
+        # "recent_sales": recent_sales,
+        # "recent_expenses": recent_expenses,
         "active_sidebar": "dashboard",
         # Add URLs for dashboard cards
         "shipment_profit_url": reverse('panel:shipment_profit_report'),
@@ -119,7 +134,7 @@ def product_add(request):
             form.save()
             messages.success(request, "تم إضافة المنتج بنجاح.")
             return redirect('panel:product_list')
-        product = form.instance
+        product = None
     else:
         form = ProductForm()
         product = None
@@ -141,6 +156,7 @@ def product_edit(request, pk):
             form.save()
             messages.success(request, "تم تعديل المنتج بنجاح.")
             return redirect('panel:product_list')
+        
     else:
         form = ProductForm(instance=product)
     return render(request, 'products/product_form.html', {
@@ -875,14 +891,14 @@ class ShipmentForm(forms.ModelForm):
 
     class Meta:
         model = Shipment
-        fields = ['product', 'quantity', 'cost_usd',"cost_sdg", "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
+        fields = ['product', 'quantity', 'cost_usd', "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
         labels = {
             'product': 'المنتج',
             'quantity': 'الكمية',
             'shipment_cost': 'تكاليف الشحن الاضافية بالجنيه (ترحيل, جمارك, تحميل و غيرها)',
             'batch_number': 'رقم التشغيلة',                 
             'cost_usd': 'تكلفة الوحدة بالدولار',
-            "cost_sdg": "تكلفة الوحدة بالجنيه",
+            # "cost_sdg": "تكلفة الوحدة بالجنيه",
             "sale_usd": "سعر البيع بالدولار",
             'expiry_date': 'تاريخ الانتهاء',
             'supplier': 'المورد',
@@ -909,8 +925,15 @@ def shipment_create(request):
     if request.method == 'POST':
         form = ShipmentForm(request.POST)
         if form.is_valid():
+            sdg_cost = form.cleaned_data['shipment_cost']
+            balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+            if balance < sdg_cost:
+                form.add_error('shipment_cost', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية تكاليف الشحن ({sdg_cost}).")
+                return render(request, 'shipments/shipment_form.html', {'form': form, 'active_sidebar': 'shipments'})
+
             shipment = form.save(commit=False)
             shipment.received_at = timezone.now()
+            shipment.cost_sdg = float(shipment.cost_usd) * get_latest_exchange_rate("USD")
             shipment.save()
             # Create Inventory for this shipment
             from .models import Inventory
@@ -921,6 +944,7 @@ def shipment_create(request):
             )
             messages.success(request, "تم تسجيل الشحنة بنجاح.")
             return redirect('panel:shipment_list')
+        
     else:
         form = ShipmentForm()
     return render(request, 'shipments/shipment_form.html', {
@@ -938,9 +962,21 @@ def shipment_edit(request, pk):
     except Inventory.DoesNotExist:
         inventory = None
     orig_quantity = shipment.quantity
+    old_shipment_cost = shipment.shipment_cost
+
     if request.method == 'POST':
         form = ShipmentForm(request.POST, instance=shipment)
         if form.is_valid():
+            # Check if shipment cost has changed
+            if form.cleaned_data['shipment_cost'] != old_shipment_cost:
+                sdg_cost = form.cleaned_data['shipment_cost']
+                # check if new cost sdg is greater than old cost sdg and increase in cost is greater than company balance
+                if sdg_cost > old_shipment_cost:
+                    balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+                    decrease_amount = sdg_cost - old_shipment_cost
+                    if balance < decrease_amount:
+                        form.add_error('shipment_cost', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية الزيادة في تكاليف الشحن ({decrease_amount}).")
+                        return render(request, 'shipments/shipment_form.html', {'form': form, 'active_sidebar': 'shipments'})
             new_shipment = form.save(commit=False)
 
             # Update inventory for this shipment
@@ -976,6 +1012,7 @@ def shipment_edit(request, pk):
             new_shipment.save()
             messages.success(request, "تم تعديل الشحنة بنجاح.")
             return redirect('panel:shipment_list')
+        
     else:
         initial = {
             'batch_number': shipment.batch_number,
@@ -1032,14 +1069,15 @@ def shipment_profit_report(request):
         related_sales = sale_items.values_list('sale_id', flat=True).distinct()
         commission_amount = Commission.objects.filter(sale_id__in=related_sales).aggregate(total=Sum('amount'))['total'] or 0
         # --- End commission calculation ---
-        profit = total_revenue - (shipment.shipment_cost + purchase_cost + commission_amount)
+        inventory_value = 0
+        if inventory:
+            inventory_value = inventory.quantity * (shipment.cost_sdg)
+        profit = total_revenue + inventory_value - (shipment.shipment_cost + purchase_cost + commission_amount)
         # Get batch info from this shipment's inventory
         batch_number = shipment.batch_number if shipment else ''
         expiry_date = shipment.expiry_date if shipment else ''
         # --- Calculate inventory value (unrealized value) ---
-        inventory_value = 0
-        if inventory:
-            inventory_value = inventory.quantity * (shipment.sale_usd * shipment.product.exchange_rate)
+       
         shipment_data.append({
             'shipment': shipment,
             'batch_number': batch_number,
@@ -1220,7 +1258,9 @@ def employee_add(request):
         if form.is_valid():
             form.save()
             messages.success(request, "تم إضافة المندوب بنجاح.")
-            return redirect('panel:employee_list')
+            return redirect('panel:employee_list'
+            )
+        
     else:
         form = EmployeeForm()
     return render(request, 'panel/employee_form.html', {
@@ -1246,6 +1286,7 @@ def employee_edit(request, pk):
             # --- End recalc ---
             messages.success(request, "تم تعديل بيانات المندوب بنجاح.")
             return redirect('panel:employee_list')
+        
     else:
         form = EmployeeForm(instance=employee)
     return render(request, 'panel/employee_form.html', {
@@ -1344,13 +1385,6 @@ def net_profit_dashboard(request):
         (s.shipment_cost + (s.cost_sdg* s.quantity)) for s in filtered_shipments
     )
     # print(filtered_shipments)
-
-    net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
-
-    # For filters
-    areas = Area.objects.all()
-    all_shipments = Shipment.objects.all()
-
     # --- Inventory value calculation ---
     from .models import Inventory
     inventory_value = 0
@@ -1360,9 +1394,17 @@ def net_profit_dashboard(request):
         product = inv.product
         # Calculate sale price in SDG for this inventory
         if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-            sale_price_sdg = float(shipment.cost_usd) * float(product.exchange_rate)
+            sale_price_sdg = shipment.cost_sdg
             inventory_value += inv.quantity * sale_price_sdg
     # --- End inventory value calculation ---
+
+    net_profit = total_sales + inventory_value - (total_purchases + total_expenses + total_commissions)
+
+    # For filters
+    areas = Area.objects.all()
+    all_shipments = Shipment.objects.all()
+
+    
 
     return render(request, 'panel/net_profit_dashboard.html', {
         'total_sales': total_sales,
@@ -1552,39 +1594,60 @@ def expense_list(request):
     })
 
 def expense_add(request):
-    category_choices = Expense.CATEGORY_CHOICES
+    # category_choices = Expense.CATEGORY_CHOICES
     if request.method == 'POST':
         form = ExpenseForm(request.POST)
+        expense = None  # ✅ initialize early to avoid UnboundLocalError
         if form.is_valid():
+            balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+            amount = form.cleaned_data['amount']
+            if balance < amount:
+                # expense = None
+                form.add_error('amount', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية المصروف ({amount}).")
+                return render(request, 'expenses/expense_form.html', {'form': form, "active_sidebar": "expenses",'expense': expense})
+
             expense = form.save()
             messages.success(request, "تم إضافة المصروف بنجاح.")
             return redirect('panel:expense_list')
-        expense = form.instance
+        # expense = None
     else:
         form = ExpenseForm()
         expense = None
     return render(request, 'expenses/expense_form.html', {
         'form': form,
         'expense': expense,
-        'category_choices': category_choices,
+        # 'category_choices': category_choices,
         "active_sidebar": "expenses"
     })
 
 def expense_edit(request, pk):
     expense = get_object_or_404(Expense, pk=pk)
-    category_choices = Expense.CATEGORY_CHOICES
+    old_amount = expense.amount
+    # category_choices = Expense.CATEGORY_CHOICES
     if request.method == 'POST':
+
         form = ExpenseForm(request.POST, instance=expense)
         if form.is_valid():
+            print("skhdytuhk")
+            
+            amount = form.cleaned_data['amount']
+            if amount > old_amount:
+                balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+                if balance < (amount - old_amount):
+                    form.add_error('amount', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية الزيادة في المصروف ({amount - old_amount}).")
+                    return render(request, 'expenses/expense_form.html', {'form': form, "active_sidebar": "expenses", 'expense': expense})
+
+
             form.save()
             messages.success(request, "تم تعديل المصروف بنجاح.")
             return redirect('panel:expense_list')
+        
     else:
         form = ExpenseForm(instance=expense)
     return render(request, 'expenses/expense_form.html', {
         'form': form,
         'expense': expense,
-        'category_choices': category_choices,
+        # 'category_choices': category_choices,
         "active_sidebar": "expenses"
     })
 
@@ -1600,14 +1663,19 @@ def expense_delete(request, pk):
     })
 
 class ExpenseForm(ModelForm):
+    date = forms.DateField(initial=timezone.now().date)
     class Meta:
         model = Expense
-        fields = ['description', 'category', 'amount', 'date']
+        fields = ['description', 'amount', 'date']
         labels = {
             'description': 'الوصف',
-            'category': 'الفئة',
-            'amount': 'المبلغ',
+            # 'category': 'الفئة',
+            'amount': 'المبلغ بالجنيه',
             'date': 'التاريخ',
+        }
+        # make date today by default and make it required
+        widgets = {
+            'date': forms.DateInput(attrs={'type': 'date', 'value': datetime.now().strftime('%Y-%m-%d')}),
         }
 
 from django import forms
@@ -1651,6 +1719,7 @@ def client_add(request):
             client = form.save()
             messages.success(request, "تم إضافة العميل بنجاح.")
             return redirect('panel:client_list')
+        
     else:
         form = ClientForm()
     return render(request, 'clients/client_form.html', {
@@ -1669,6 +1738,7 @@ def client_edit(request, pk):
             form.save()
             messages.success(request, "تم تعديل بيانات العميل بنجاح.")
             return redirect('panel:client_list')
+        
     else:
         form = ClientForm(instance=client)
     return render(request, 'clients/client_form.html', {
@@ -1713,6 +1783,7 @@ def area_add(request):
             form.save()
             messages.success(request, "تمت إضافة المنطقة بنجاح.")
             return redirect('panel:area_list')
+        
     else:
         form = AreaForm()
     return render(request, 'areas/area_form.html', {
@@ -1729,6 +1800,7 @@ def area_edit(request, pk):
             form.save()
             messages.success(request, "تم تعديل المنطقة بنجاح.")
             return redirect('panel:area_list')
+        
     else:
         form = AreaForm(instance=area)
     return render(request, 'areas/area_form.html', {
@@ -1778,6 +1850,10 @@ def commission_pay(request, employee_id):
     unpaid = employee.get_unpaid_commission()
     if amount <= 0 or amount > unpaid:
         messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
+        return redirect('panel:employee_detail', pk=employee.pk)
+    balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+    if balance < amount:
+        messages.error(request, f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية العمولة ({amount}).")
         return redirect('panel:employee_detail', pk=employee.pk)
     from .models import CommissionPayment
     CommissionPayment.objects.create(employee=employee, amount=amount, note=note)
@@ -1913,6 +1989,7 @@ def supplier_add(request):
             form.save()
             messages.success(request, "تم إضافة المورد بنجاح.")
             return redirect('panel:supplier_list')
+        
     else:
         form = SupplierForm()
     return render(request, 'suppliers/supplier_form.html', {
@@ -1929,6 +2006,7 @@ def supplier_edit(request, pk):
             form.save()
             messages.success(request, "تم تعديل بيانات المورد بنجاح.")
             return redirect('panel:supplier_list')
+        
     else:
         form = SupplierForm(instance=supplier)
     return render(request, 'suppliers/supplier_form.html', {
@@ -1956,10 +2034,30 @@ def supplier_add_payment(request, pk):
     supplier = get_object_or_404(Supplier, pk=pk)
     form = SupplierPaymentForm(request.POST, supplier=supplier)
     if form.is_valid():
-        payment = form.save(commit=False)
-        payment.supplier = supplier
-        payment.save()
-        messages.success(request, f"تم تسجيل دفعة بمبلغ {payment.amount} بنجاح.")
+        amount = form.cleaned_data['amount']
+        balance = calculate_company_balance(Currency.objects.get(code='USD'))
+        if balance < amount:
+            shipments = supplier.shipments.select_related('product').all().order_by('-received_at')
+            payments = supplier.payments.order_by('-paid_at')
+            # form.add_error('amount', f"الرصيد الحالي للدولار ({balance}) غير كافٍ لتغطية المبلغ ({amount}).")
+            error = f"الرصيد الحالي للدولار ({balance}) غير كافٍ لتغطية المبلغ ({amount})."
+            messages.error(request, error)
+            
+            return render(request, 'suppliers/supplier_detail.html', {'form': form, 
+            'supplier': supplier,
+            'active_sidebar': 'suppliers',
+            'shipments': shipments,
+            'payments': payments,
+            'payment_form': form,
+            'remaining_amount': supplier.remaining_amount,
+            
+            })
+        else:
+
+            payment = form.save(commit=False)
+            payment.supplier = supplier
+            payment.save()
+            messages.success(request, f"تم تسجيل دفعة بمبلغ {payment.amount} بنجاح.")
     else:
         for error in form.errors.values():
             messages.error(request, error)
@@ -2014,6 +2112,7 @@ def lost_product_add(request):
             form.save()
             messages.success(request, "تم تسجيل المنتج المفقود بنجاح.")
             return redirect('panel:lost_product_list')
+        
     else:
         form = LostProductForm()
     return render(request, 'lost_products/lost_product_form.html', {

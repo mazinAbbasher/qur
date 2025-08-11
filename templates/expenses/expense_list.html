@@ -14,7 +14,7 @@
   </div>
   <!-- Download & Share PDF Button -->
   <div class="mb-3 d-flex justify-content-end">
-    <a href="{% url 'panel:expense_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" target="_blank">
+    <a href="{% url 'panel:expense_list_pdf' %}?{% if request.GET %}{{ request.GET.urlencode }}{% endif %}" class="btn btn-outline-primary" >
       <i class="bi bi-file-earmark-pdf"></i> تحميل  PDF
     </a>
   </div>
@@ -55,8 +55,8 @@
           <thead class="bg-gray-100">
             <tr>
               <th class="px-4 py-2 text-right font-bold">الوصف</th>
-              <th class="px-4 py-2 text-right font-bold">التصنيف</th>
-              <th class="px-4 py-2 text-right font-bold">المبلغ</th>
+              {% comment %} <th class="px-4 py-2 text-right font-bold">التصنيف</th> {% endcomment %}
+              <th class="px-4 py-2 text-right font-bold">المبلغ بالجنيه</th>
               <th class="px-4 py-2 text-right font-bold">التاريخ</th>
               <th class="px-4 py-2 text-right font-bold">إجراءات</th>
             </tr>
@@ -65,9 +65,9 @@
             {% for expense in expenses %}
             <tr>
               <td class="px-4 py-2">{{ expense.description|default:"—" }}</td>
-              <td class="px-4 py-2">{{ expense.get_category_display|default:"—" }}</td>
+              {% comment %} <td class="px-4 py-2">{{ expense.get_category_display|default:"—" }}</td> {% endcomment %}
               <td class="px-4 py-2">
-                <span class="badge bg-info text-white">{{ expense.amount|intcomma }}</span>
+                <span class="text-dark fs-5">{{ expense.amount|intcomma|floatformat:0 }}</span>
               </td>
               <td class="px-4 py-2">{{ expense.date|date:"Y-m-d" }}</td>
               <td class="px-4 py-2">

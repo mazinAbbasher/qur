@@ -35,7 +35,7 @@
             </div>
             {{ form.quantity|as_crispy_field }}
             {{ form.cost_usd|as_crispy_field }}
-            {{ form.cost_sdg|as_crispy_field }}
+            {% comment %} {{ form.cost_sdg|as_crispy_field }} {% endcomment %}
             {{ form.sale_usd|as_crispy_field }}
             {{ form.shipment_cost|as_crispy_field }}
             {{ form.batch_number|as_crispy_field }}

@@ -381,14 +381,14 @@ def update_invoice_on_payment_delete(sender, instance, **kwargs):
 post_delete.connect(update_invoice_on_payment_delete, sender=InvoicePayment)
 
 class Expense(models.Model):
-    CATEGORY_CHOICES = [
-        ('rent', 'إيجار'),
-        ('salary', 'رواتب'),
-        ('utility', 'خدمات'),
-        ('other', 'أخرى'),
-    ]
+    # CATEGORY_CHOICES = [
+    #     ('rent', 'إيجار'),
+    #     ('salary', 'رواتب'),
+    #     ('utility', 'خدمات'),
+    #     ('other', 'أخرى'),
+    # ]
     description = models.CharField(max_length=255)
-    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other')
+    # category = models.CharField(max_length=50, choices=CATEGORY_CHOICES, default='other')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     date = models.DateField(default=timezone.now)
 

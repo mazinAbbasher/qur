@@ -41,8 +41,7 @@
           <input type="date" name="date_to" class="form-control" value="{{ date_to|default_if_none:'' }}">
         </div>
         <div class="col-md-2 d-flex gap-2">
-          {% comment %} <button type="submit" class="btn btn-primary">تصفية</button> {% endcomment %}
-          <a href="?{% if selected_currency %}currency={{selected_currency}}&{% endif %}{% if selected_type %}transaction_type={{selected_type}}&{% endif %}{% if date_from %}date_from={{date_from}}&{% endif %}{% if date_to %}date_to={{date_to}}&{% endif %}download=pdf" class="btn btn-outline-secondary">تحميل PDF</a>
+          <a href="{% url 'partner_transactions_pdf' partner.id %}?{% if selected_currency %}currency={{selected_currency}}&{% endif %}{% if selected_type %}transaction_type={{selected_type}}&{% endif %}{% if date_from %}date_from={{date_from}}&{% endif %}{% if date_to %}date_to={{date_to}}&{% endif %}" class="btn btn-outline-secondary">تحميل PDF</a>
         </div>
       </form>
       <script>
