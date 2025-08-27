@@ -63,7 +63,7 @@ def index(request):
             inventory_value += inv.quantity * sale_price_sdg
     # --- End inventory value calculation ---
 
-    net_profit = total_sales + inventory_value - (total_purchases + total_expenses + total_commissions)
+    net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
     # Current month summary
     # first_of_month = today.replace(day=1)
     # month_sales = Sale.objects.filter(created_at__date__gte=first_of_month)
@@ -301,7 +301,7 @@ def client_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -338,7 +338,7 @@ def area_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -537,19 +537,19 @@ def sale_create(request):
             for item in sale_items:
                 # Deduct both paid and free units from inventory
                 total_units = item.quantity + item.free_units
-                if total_units > item.inventory.quantity:
-                    messages.error(request, f"الكمية المطلوبة (مع المجاني) غير متوفرة في الدفعة {item.inventory.shipment.batch_number} للمنتج {item.inventory.product.name}")
-                    return render(request, 'sales/sale_form.html', {
-                        'sale_form': sale_form,
-                        'formset': formset,
-                        'latest_rate': latest_rate,
-                        'products': products,
-                        'inventories': inventories,
-                        'products_with_batches': products_with_batches,
-                        'inventories_by_product': inventories_by_product,
-                        'sale': None,
-                        "active_sidebar": "sales"
-                    })
+                # if total_units > item.inventory.quantity:
+                #     messages.error(request, f"الكمية المطلوبة (مع المجاني) غير متوفرة في الدفعة {item.inventory.shipment.batch_number} للمنتج {item.inventory.product.name}")
+                #     return render(request, 'sales/sale_form.html', {
+                #         'sale_form': sale_form,
+                #         'formset': formset,
+                #         'latest_rate': latest_rate,
+                #         'products': products,
+                #         'inventories': inventories,
+                #         'products_with_batches': products_with_batches,
+                #         'inventories_by_product': inventories_by_product,
+                #         'sale': None,
+                #         "active_sidebar": "sales"
+                #     })
                 item.inventory.quantity -= total_units
                 item.inventory.save()
                 item.save()
@@ -743,7 +743,7 @@ def sale_list_pdf(request):
     .bg-danger { background: #dc3545 !important; color: #fff !important; }
     .bg-warning { background: #ffc107 !important; color: #212529 !important; }
     """
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
             output.name,
             stylesheets=[CSS(string=pdf_css)]
@@ -773,7 +773,7 @@ def supplier_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -814,7 +814,7 @@ def shipment_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -838,7 +838,7 @@ def inventory_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -871,7 +871,7 @@ def expense_list_pdf(request):
         'today': date.today(),
         'logo_url': logo_url,
     })
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
         output.seek(0)
         pdf = output.read()
@@ -1072,7 +1072,7 @@ def shipment_profit_report(request):
         inventory_value = 0
         if inventory:
             inventory_value = inventory.quantity * (shipment.cost_sdg)
-        profit = total_revenue + inventory_value - (shipment.shipment_cost + purchase_cost + commission_amount)
+        profit = total_revenue - (shipment.shipment_cost + purchase_cost + commission_amount)
         # Get batch info from this shipment's inventory
         batch_number = shipment.batch_number if shipment else ''
         expiry_date = shipment.expiry_date if shipment else ''
@@ -1398,7 +1398,7 @@ def net_profit_dashboard(request):
             inventory_value += inv.quantity * sale_price_sdg
     # --- End inventory value calculation ---
 
-    net_profit = total_sales + inventory_value - (total_purchases + total_expenses + total_commissions)
+    net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
 
     # For filters
     areas = Area.objects.all()
@@ -1492,7 +1492,7 @@ def invoice_add_payment(request, pk):
     else:
         for error in form.errors.values():
             messages.error(request, error)
-    return redirect('panel:sale_detail', pk=invoice.pk)
+    return redirect('panel:sale_detail', pk=invoice.sale.pk)
 
 @require_POST
 def invoice_mark_paid(request, pk):
@@ -1503,7 +1503,7 @@ def invoice_mark_paid(request, pk):
             InvoicePayment.objects.create(invoice=invoice, amount=remaining)
         invoice.update_status()
         messages.success(request, "تم تحديد الفاتورة كمدفوعة بنجاح.")
-    return redirect('panel:sale_detail', pk=invoice.pk)
+    return redirect('panel:sale_detail', pk=invoice.sale.pk)
 
 @require_POST
 def invoice_mark_unpaid(request, pk):
@@ -1513,7 +1513,7 @@ def invoice_mark_unpaid(request, pk):
         invoice.refresh_from_db()  # Ensure we have the latest state after deletion
         invoice.update_status()
         messages.success(request, "تم تحديد الفاتورة كغير مدفوعة.")
-    return redirect('panel:invoice_detail', pk=invoice.pk)
+    return redirect('panel:invoice_detail', pk=invoice.sale.pk)
 
 @require_GET
 def invoice_pdf(request, pk):
@@ -1553,7 +1553,7 @@ def invoice_pdf(request, pk):
     .bg-success { background: #28a745 !important; color: #fff !important; }
     .bg-danger { background: #dc3545 !important; color: #fff !important; }
     """
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
             output.name,
             stylesheets=[CSS(string=pdf_css)]

@@ -366,6 +366,7 @@ document.addEventListener('DOMContentLoaded', function() {
   function updateBatchAndExpiry(row, productId, selectedBatchId) {
     const batchSelect = row.querySelector('.batch-select');
     const expiryInput = row.querySelector('.expiry-date');
+    const qtyInput = row.querySelector('input[name$="quantity"]');
     const batches = productBatchData[productId] || [];
     batchSelect.innerHTML = '';
     batches.forEach(batch => {
@@ -383,6 +384,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set price for this product and batch
     let batchId = selected ? selected.id : (batches[0] && batches[0].id);
     updatePrice(row, productId, batchId);
+
+    // Set max quantity for selected batch
+    if (qtyInput && batchId && inventoryData[batchId]) {
+      qtyInput.setAttribute('max', inventoryData[batchId].quantity);
+    } else if (qtyInput) {
+      qtyInput.removeAttribute('max');
+    }
   }
 
   // Attach product/batch change events for a row
@@ -390,6 +398,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const productSelect = row.querySelector('.product-select');
     const batchSelect = row.querySelector('.batch-select');
     const expiryInput = row.querySelector('.expiry-date');
+    const qtyInput = row.querySelector('input[name$="quantity"]');
     if (!productSelect || !batchSelect) return;
     productSelect.onchange = function() {
       updateBatchAndExpiry(row, this.value, null);
@@ -400,11 +409,23 @@ document.addEventListener('DOMContentLoaded', function() {
       const selected = batches.find(b => b.id === this.value);
       expiryInput.value = selected ? selected.expiry : '-';
       updatePrice(row, productSelect.value, this.value);
+      // Set max quantity for selected batch
+      if (qtyInput && this.value && inventoryData[this.value]) {
+        qtyInput.setAttribute('max', inventoryData[this.value].quantity);
+      } else if (qtyInput) {
+        qtyInput.removeAttribute('max');
+      }
       recalcTotals();
     };
     // Set price on load
     let batchId = batchSelect.value;
     updatePrice(row, productSelect.value, batchId);
+    // Set max quantity on load
+    if (qtyInput && batchId && inventoryData[batchId]) {
+      qtyInput.setAttribute('max', inventoryData[batchId].quantity);
+    } else if (qtyInput) {
+      qtyInput.removeAttribute('max');
+    }
   }
 
   // Attach events for all existing rows
@@ -566,18 +587,28 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       // Quantity
       let qty = row.querySelector('input[name$="quantity"]');
-      if (!qty || qty.value === '' || isNaN(qty.value) || Number(qty.value) <= 0) {
+      let qtyVal = qty && qty.value !== '' && !isNaN(qty.value) ? Number(qty.value) : 0;
+      if (!qty || qty.value === '' || isNaN(qty.value) || qtyVal <= 0) {
         errors.push('يرجى إدخال كمية صحيحة في الصف رقم ' + (idx+1));
+      }
+      // Free goods discount
+      let freeGoodsDiscount = row.querySelector('input[name$="free_goods_discount"]');
+      let freeGoodsVal = freeGoodsDiscount && freeGoodsDiscount.value !== '' && !isNaN(freeGoodsDiscount.value) ? Number(freeGoodsDiscount.value) : 0;
+      if (!freeGoodsDiscount || freeGoodsDiscount.value === '' || isNaN(freeGoodsDiscount.value) || freeGoodsVal < 0 || freeGoodsVal > 100) {
+        errors.push('يرجى إدخال خصم بضاعة مجانية صحيح في الصف رقم ' + (idx+1));
+      }
+      // Check total quantity (qty + free goods) does not exceed inventory
+      if (batch && batch.value && inventoryData[batch.value]) {
+        let invQty = Number(inventoryData[batch.value].quantity);
+        let totalQty = qtyVal + Math.floor(qtyVal * freeGoodsVal / 100);
+        if (totalQty > invQty) {
+          errors.push('إجمالي الكمية (الكمية + البضاعة المجانية) يتجاوز المتاح في المخزون للصف رقم ' + (idx+1) + '. أقصى كمية متاحة: ' + invQty);
+        }
       }
       // Price (no longer editable, but still check)
       let price = row.querySelector('input[name$="price"]');
       if (!price || price.value === '' || isNaN(price.value) || Number(price.value) < 0) {
         errors.push('يرجى إدخال سعر صحيح في الصف رقم ' + (idx+1));
-      }
-      // Free goods discount
-      let freeGoodsDiscount = row.querySelector('input[name$="free_goods_discount"]');
-      if (!freeGoodsDiscount || freeGoodsDiscount.value === '' || isNaN(freeGoodsDiscount.value) || Number(freeGoodsDiscount.value) < 0 || Number(freeGoodsDiscount.value) > 100) {
-        errors.push('يرجى إدخال خصم بضاعة مجانية صحيح في الصف رقم ' + (idx+1));
       }
       // Price discount
       let priceDiscount = row.querySelector('input[name$="price_discount"]');

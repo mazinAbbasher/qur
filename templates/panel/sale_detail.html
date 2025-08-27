@@ -6,6 +6,13 @@
     <div class="card-header bg-info text-white">
       <h4 class="mb-0 text-white">تفاصيل البيع <span class="text-white-50">#{{ sale.pk }}</span></h4>
     </div>
+    {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
     <div class="card-body">
       <div class="row mb-3">
         <div class="col-md-6">

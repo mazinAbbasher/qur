@@ -31,7 +31,7 @@
               <tr>
                 <th>العملة</th>
                 <th>الرصيد</th>
-                <th>ما يعادل بالجنيه </th>
+                {% comment %} <th>ما يعادل بالجنيه </th> {% endcomment %}
               </tr>
             </thead>
             <tbody>
@@ -39,18 +39,18 @@
               <tr>
                 <td>{{ b.currency }}</td>
                 <td>{{ b.balance|floatformat:0|intcomma }}</td>
-                <td>{{ b.sdg_equiv|floatformat:0|intcomma }}</td>
+                {% comment %} <td>{{ b.sdg_equiv|floatformat:0|intcomma }}</td> {% endcomment %}
               </tr>
               {% empty %}
               <tr>
                 <td colspan="3" class="text-center text-muted">لا توجد عملات مسجلة.</td>
               </tr>
               {% endfor %}
-              <tr class="table-info summary">
+              {% comment %} <tr class="table-info summary">
                 <td>إجمالي بالجنيه</td>
                 <td></td>
                 <td>{{ balances_total_sdg|floatformat:0|intcomma }}</td>
-              </tr>
+              </tr> {% endcomment %}
             </tbody>
           </table>
         </div>

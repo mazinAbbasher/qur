@@ -262,7 +262,7 @@ def partner_transactions_pdf(request, partner_id):
     th, td { border: 1px solid #333; padding: 6px; text-align: left; }
     th { background: #f8f8f8; }
     """
-    with tempfile.NamedTemporaryFile(suffix=".pdf") as output:
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
         HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
             output.name,
             stylesheets=[CSS(string=pdf_css)]

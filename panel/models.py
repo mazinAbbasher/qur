@@ -338,6 +338,22 @@ class Invoice(models.Model):
                     break
         super().save(*args, **kwargs)
 
+    def update_status(self):
+        # Subtract returned products value from sale total
+        from decimal import Decimal
+        # returned_total = sum(Decimal(str(r.value)) for r in self.sale.returned_products.all())
+        # print(returned_total)
+        net_total = Decimal(str(self.sale.total))
+        paid = self.paid_amount
+        print(paid, net_total)
+        if paid >= net_total and net_total > 0:
+            self.status = 'paid'
+        elif paid > 0:
+            self.status = 'partial'
+        else:
+            self.status = 'unpaid'
+        self.save(update_fields=['status'])
+
     @property
     def paid_amount(self):
         from decimal import Decimal
@@ -347,16 +363,6 @@ class Invoice(models.Model):
     def remaining_amount(self):
         from decimal import Decimal
         return self.sale.total - self.paid_amount
-
-    def update_status(self):
-        paid = self.paid_amount
-        if paid >= self.total and self.total > 0:
-            self.status = 'paid'
-        elif paid > 0:
-            self.status = 'partial'
-        else:
-            self.status = 'unpaid'
-        self.save(update_fields=['status'])
 
     def __str__(self):
         return f"Invoice #{self.number or self.pk} for Sale #{self.sale.pk}"
