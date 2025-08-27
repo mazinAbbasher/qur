@@ -891,14 +891,14 @@ class ShipmentForm(forms.ModelForm):
 
     class Meta:
         model = Shipment
-        fields = ['product', 'quantity', 'cost_usd', "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
+        fields = ['product', 'quantity', 'cost_usd',"exchange_rate", "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
         labels = {
             'product': 'المنتج',
             'quantity': 'الكمية',
             'shipment_cost': 'تكاليف الشحن الاضافية بالجنيه (ترحيل, جمارك, تحميل و غيرها)',
             'batch_number': 'رقم التشغيلة',                 
             'cost_usd': 'تكلفة الوحدة بالدولار',
-            # "cost_sdg": "تكلفة الوحدة بالجنيه",
+            "exchange_rate": "سعر الصرف للدولار ",
             "sale_usd": "سعر البيع بالدولار",
             'expiry_date': 'تاريخ الانتهاء',
             'supplier': 'المورد',
@@ -913,6 +913,7 @@ class ShipmentForm(forms.ModelForm):
         self.fields['batch_number'].widget.attrs.update({'class': 'form-control'})
         self.fields['expiry_date'].widget.attrs.update({'class': 'form-control'})
         self.fields['cost_usd'].widget.attrs.update({'class': 'form-control', 'step': '0.01', 'min': 0})
+        self.fields['exchange_rate'].widget.attrs.update({'class': 'form-control', 'step': '0.01', 'min': 1})
         self.fields['supplier'].queryset = Supplier.objects.all()
         # Only disable product field if editing (instance with pk)
         if self.instance and getattr(self.instance, 'pk', None):
@@ -933,7 +934,7 @@ def shipment_create(request):
 
             shipment = form.save(commit=False)
             shipment.received_at = timezone.now()
-            shipment.cost_sdg = float(shipment.cost_usd) * get_latest_exchange_rate("USD")
+            shipment.cost_sdg = float(shipment.cost_usd) * float(shipment.exchange_rate)
             shipment.save()
             # Create Inventory for this shipment
             from .models import Inventory
@@ -1009,6 +1010,8 @@ def shipment_edit(request, pk):
                     shipment=new_shipment,
                     quantity=new_shipment.quantity
                 )
+            # update cost_sdg
+            new_shipment.cost_sdg = float(new_shipment.cost_usd) * float(new_shipment.exchange_rate)
             new_shipment.save()
             messages.success(request, "تم تعديل الشحنة بنجاح.")
             return redirect('panel:shipment_list')

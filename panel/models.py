@@ -163,7 +163,9 @@ class Shipment(models.Model):
     cost_sdg = models.DecimalField(max_digits=12, decimal_places=2, null=True)
     sale_usd = models.DecimalField(max_digits=10, decimal_places=2, null=True)
     batch_number = models.CharField(max_length=100)  # <-- moved here
-    expiry_date = models.DateField()                 # <-- moved here
+    expiry_date = models.DateField() 
+    exchange_rate = models.IntegerField(null=True)
+                    # <-- moved here
     supplier = models.ForeignKey('Supplier', on_delete=models.SET_NULL, null=True, blank=True, related_name='shipments')
 
     # @property
