@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">{% if employee %}تعديل بيانات المدير{% else %}إضافة مدير جديد{% endif %}</h5>
+        </div>
+        <div class="card-body">
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.errors %}
+              <div class="alert alert-danger">
+                {% for field in form %}
+                  {% for error in field.errors %}
+                    <div>{{ error }}</div>
+                  {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                  <div>{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <div class="mb-3">
+              {{ form.name.label_tag }} {{ form.name }}
+            </div>
+            <div class="mb-3">
+              {{ form.commission_percentage.label_tag }} {{ form.commission_percentage }}
+            </div>
+            
+            <div class="mb-3">
+              {{ form.employees.label_tag }} {{ form.employees }}
+            </div>
+            <button class="btn btn-success" type="submit">{% if employee %}تحديث{% else %}إضافة{% endif %}</button>
+            <a href="{% url 'panel:manager_list' %}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+

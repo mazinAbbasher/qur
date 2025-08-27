@@ -96,4 +96,13 @@ urlpatterns = [
     path('suppliers/<int:pk>/delete/', views.supplier_delete, name='supplier_delete'),
     path('suppliers/<int:pk>/add_payment/', views.supplier_add_payment, name='supplier_add_payment'),
     path('suppliers/export/pdf/', views.supplier_list_pdf, name='supplier_list_pdf'),
+    
+    # Manager URLs
+    path('managers/', views.manager_list, name='manager_list'),
+    path('managers/add/', views.manager_add, name='manager_add'),
+    path('managers/<int:pk>/edit/', views.manager_edit, name='manager_edit'),
+    path('managers/<int:pk>/delete/', views.manager_delete, name='manager_delete'),
+    path('managers/<int:pk>/', views.manager_detail, name='manager_detail'),
+    path("manager_commission_pay/<int:manager_id>/", views.manager_commission_pay, name="manager_commission_pay"),  
+
 ]

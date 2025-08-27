@@ -62,7 +62,18 @@ def index(request):
             sale_price_sdg = shipment.cost_sdg
             inventory_value += inv.quantity * sale_price_sdg
     # --- End inventory value calculation ---
-
+ # --- Calculate deserved manager commissions ---
+    total_manager_commissions = Decimal('0')
+    managers = Manager.objects.all()
+    for manager in managers:
+        employees = manager.employees.all()
+        manager_sales = sales.filter(employee__in=employees)
+        manager_sales_total = manager_sales.aggregate(total=Sum('total'))['total'] or Decimal('0')
+        commission_percentage = manager.commission_percentage or Decimal('0')
+        deserved_commission = manager_sales_total * (commission_percentage / Decimal('100'))
+        total_manager_commissions += deserved_commission
+    total_commissions += total_manager_commissions
+    # --- End manager commission calculation ---
     net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
     # Current month summary
     # first_of_month = today.replace(day=1)
@@ -631,6 +642,15 @@ def sale_return_product(request, pk):
         returned = form.save(commit=False)
         returned.sale = sale
         returned.save()
+        # update the commsison for the employee if exists
+        employee = sale.employee
+        if employee and getattr(employee, 'commission_percentage', 0):
+            commission_percentage = float(employee.commission_percentage)
+            commission_amount = float(sale.total or 0) * (commission_percentage / 100)
+            Commission.objects.update_or_create(
+                employee=employee, sale=sale,
+                defaults={'amount': commission_amount}
+            )
         messages.success(request, f"تم تسجيل إرجاع {returned.quantity} وحدة من {returned.sale_item.inventory.product.name}.")
     else:
         for error in form.errors.values():
@@ -715,7 +735,7 @@ def sale_list_pdf(request):
     if area_id:
         sales = sales.filter(client__area_id=area_id)
     if status == "partial_or_unpaid":
-        sales = sales.filter(invoice__status__in=["partial", "unpaid"])
+        sales = sales.filter(invoice__status__in["partial", "unpaid"])
     elif status:
         sales = sales.filter(invoice__status=status)
     if employee_id:
@@ -1348,6 +1368,7 @@ def net_profit_dashboard(request):
     expenses = Expense.objects.all()
     commissions = Commission.objects.all()
     shipments = Shipment.objects.all()
+    from .models import Manager
 
     # Date filtering
     if start_date:
@@ -1378,6 +1399,19 @@ def net_profit_dashboard(request):
     total_sales = sales.aggregate(total=Sum('total'))['total'] or Decimal('0')
     total_expenses = expenses.aggregate(total=Sum('amount'))['total'] or Decimal('0')
     total_commissions = commissions.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+
+    # --- Calculate deserved manager commissions ---
+    total_manager_commissions = Decimal('0')
+    managers = Manager.objects.all()
+    for manager in managers:
+        employees = manager.employees.all()
+        manager_sales = sales.filter(employee__in=employees)
+        manager_sales_total = manager_sales.aggregate(total=Sum('total'))['total'] or Decimal('0')
+        commission_percentage = manager.commission_percentage or Decimal('0')
+        deserved_commission = manager_sales_total * (commission_percentage / Decimal('100'))
+        total_manager_commissions += deserved_commission
+    total_commissions += total_manager_commissions
+    # --- End manager commission calculation ---
 
     # Total purchases: sum of shipment cost + purchase cost for filtered shipments
     if shipment_id:
@@ -2151,3 +2185,224 @@ class ReturnedProductForm(forms.ModelForm):
             if quantity > max_returnable:
                 raise forms.ValidationError(f"لا يمكن إرجاع أكثر من {max_returnable} وحدة لهذا العنصر.")
         return cleaned_data
+
+
+from .models import Manager
+class ManagerForm(forms.ModelForm):
+    class Meta:
+        model = Manager
+        fields = ['name', 'commission_percentage', 'employees']
+        labels = {
+            'name': 'اسم المدير',
+            'commission_percentage': 'نسبة العمولة (%)',
+            'employees': 'الموظفين',
+            
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['name'].widget.attrs.update({'class': 'form-control', 'required': True})
+        self.fields['commission_percentage'].widget.attrs.update({'class': 'form-control', 'min': 0, 'max': 100, 'step': '0.01'})
+        self.fields['employees'].widget.attrs.update({'class': 'form-select', 'multiple': True})
+
+def manager_list(request):
+    from datetime import date
+    from decimal import Decimal
+    from .models import Manager, Sale, ManagerCommissionPayment
+    today = date.today()
+    month = request.GET.get('month')
+    year = request.GET.get('year')
+    try:
+        month = int(month)
+        if not (1 <= month <= 12):
+            month = today.month
+    except (TypeError, ValueError):
+        month = today.month
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        year = today.year
+    managers = Manager.objects.all()
+    manager_data = []
+    for manager in managers:
+        employees = manager.employees.all()
+        sales = Sale.objects.filter(employee__in=employees, created_at__year=year, created_at__month=month)
+        total_sales = sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
+        commission_percentage = manager.commission_percentage or Decimal('0')
+        commission_amount = total_sales * (commission_percentage / Decimal('100'))
+        commission_payments = ManagerCommissionPayment.objects.filter(
+            manager=manager, paid_at__year=year, paid_at__month=month
+        )
+        paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+        unpaid_commission = commission_amount - paid_total
+        manager_data.append({
+            'pk': manager.pk,
+            'name': manager.name,
+            'commission_percentage': commission_percentage,
+            'commission_amount': commission_amount,
+            'unpaid_commission': unpaid_commission,
+        })
+    # Prepare months and years for dropdown (optional, for future filter UI)
+    first_manager = Manager.objects.order_by('id').first()
+    min_year = today.year
+    if first_manager:
+        # Try to get earliest employee's created_at year
+        first_emp = first_manager.employees.order_by('created_at').first()
+        if first_emp:
+            min_year = first_emp.created_at.year
+    years = list(range(min_year, today.year + 1))
+    months = [{'value': m, 'label': f"{m:02d}"} for m in range(1, 13)]
+    return render(request, 'panel/manager_list.html', {
+        'managers': manager_data,
+        'months': months,
+        'years': years,
+        'selected_month': month,
+        'selected_year': year,
+        "active_sidebar": "managers"
+    })
+
+def manager_add(request):
+    if request.method == 'POST':
+        form = ManagerForm(request.POST)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "تم إضافة المدير بنجاح.")
+            return redirect('panel:manager_list')
+        
+    else:
+        form = ManagerForm()
+    return render(request, 'panel/manager_form.html', {
+        'form': form,
+        'manager': None,
+        "active_sidebar": "managers"
+    })
+def manager_edit(request, pk):
+    manager = get_object_or_404(Manager, pk=pk)
+    if request.method == 'POST':
+        form = ManagerForm(request.POST, instance=manager)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "تم تعديل بيانات المدير بنجاح.")
+            return redirect('panel:manager_list')
+        
+    else:
+        form = ManagerForm(instance=manager)
+    return render(request, 'panel/manager_form.html', {
+        'form': form,
+        'manager': manager,
+        "active_sidebar": "managers"
+    })
+def manager_delete(request, pk):
+    manager = get_object_or_404(Manager, pk=pk)
+    if request.method == 'POST':
+        manager.delete()
+        messages.success(request, "تم حذف المدير.")
+        return redirect('panel:manager_list')
+    return render(request, 'panel/manager_confirm_delete.html', {
+        'manager': manager,
+        "active_sidebar": "managers"
+    })
+def manager_detail(request, pk):
+    from datetime import date
+    from decimal import Decimal
+    from .models import Manager, Employee, Sale, Commission
+    manager = get_object_or_404(Manager, pk=pk)
+    employees = manager.employees.all()
+    # Get month/year from GET params
+    month = request.GET.get('month')
+    year = request.GET.get('year')
+    today = date.today()
+    if not month:
+        month = today.month
+    else:
+        month = int(month)
+    if not year:
+        year = today.year
+    else:
+        year = int(year)
+    # Get sales for all employees of this manager in the selected month
+    sales = Sale.objects.filter(employee__in=employees, created_at__year=year, created_at__month=month)
+    total_sales = sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
+    commission_percentage = manager.commission_percentage or Decimal('0')
+    commission_amount = total_sales * (commission_percentage / Decimal('100'))
+    # Get all commissions for manager's employees for this month
+    commissions = Commission.objects.filter(employee__in=employees, sale__created_at__year=year, sale__created_at__month=month)
+    # Unpaid commission for manager: total commission - paid to manager
+    unpaid_commission = commission_amount
+    # Manager commission payments for this month
+    from .models import ManagerCommissionPayment
+    commission_payments = ManagerCommissionPayment.objects.filter(
+        manager=manager, paid_at__year=year, paid_at__month=month
+    ).order_by('-paid_at')
+    paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+    unpaid_commission -= paid_total
+    # Prepare months for dropdown
+    months = []
+    for m in range(1, 13):
+        months.append({'value': m, 'label': f"{year}-{m:02d}"})
+    # Employees sales summary
+    employees_summary = []
+    for emp in employees:
+        emp_sales = Sale.objects.filter(employee=emp, created_at__year=year, created_at__month=month)
+        emp_sales_total = emp_sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
+        employees_summary.append({
+            'name': emp.name,
+            'sales_count': emp_sales.count(),
+            'sales_total': emp_sales_total,
+        })
+    return render(request, 'panel/manager_detail.html', {
+        'manager': manager,
+        'employees': employees_summary,
+        'total_sales': total_sales,
+        'commission_percentage': commission_percentage,
+        'commission_amount': commission_amount,
+        'unpaid_commission': unpaid_commission,
+        'commission_payments': commission_payments,
+        'month': month,
+        'year': year,
+        'months': months,
+        "active_sidebar": "managers"
+    })
+
+from django.views.decorators.http import require_POST
+
+@require_POST
+def manager_commission_pay(request, manager_id):
+    from decimal import Decimal
+    from .models import Manager, ManagerCommissionPayment
+    manager = get_object_or_404(Manager, pk=manager_id)
+    amount = request.POST.get('amount')
+    note = request.POST.get('note', '')
+    try:
+        amount = Decimal(amount)
+    except Exception:
+        messages.error(request, "المبلغ غير صالح.")
+        return redirect('panel:manager_detail', pk=manager.pk)
+    # Calculate unpaid commission for current month/year
+    from datetime import date
+    today = date.today()
+    month = int(request.GET.get('month', today.month))
+    year = int(request.GET.get('year', today.year))
+    # Get total sales for manager's employees
+    employees = manager.employees.all()
+    sales = Sale.objects.filter(employee__in=employees, created_at__year=year, created_at__month=month)
+    total_sales = sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
+    commission_percentage = manager.commission_percentage or Decimal('0')
+    commission_amount = total_sales * (commission_percentage / Decimal('100'))
+    commission_payments = ManagerCommissionPayment.objects.filter(
+        manager=manager, paid_at__year=year, paid_at__month=month
+    )
+    paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
+    unpaid_commission = commission_amount - paid_total
+    if amount <= 0 or amount > unpaid_commission:
+        messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
+        return redirect('panel:manager_detail', pk=manager.pk)
+    # Optionally, check company SDG balance if needed
+    # from finance.models import Currency, calculate_company_balance
+    # balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+    # if balance < amount:
+    #     messages.error(request, f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية العمولة ({amount}).")
+    #     return redirect('panel:manager_detail', pk=manager.pk)
+    ManagerCommissionPayment.objects.create(manager=manager, amount=amount, note=note)
+    messages.success(request, f"تم تسجيل دفعة عمولة للمدير بمبلغ {amount} بنجاح.")
+    return redirect('panel:manager_detail', pk=manager.pk)

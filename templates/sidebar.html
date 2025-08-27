@@ -43,6 +43,15 @@
       </a>
     </li>
     <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'managers' %}active bg-gradient-info{% endif %}" href="{% url 'panel:manager_list' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/employee.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">مدراء المناديب</span>
+      </a>
+    </li>
+    
+    <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'shipments' %}active bg-gradient-info{% endif %}" href="{% url 'panel:shipment_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
           <i class="material-icons opacity-10"><img src="{% static "assets/img/shipment.svg"%}"></i>

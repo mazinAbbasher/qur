@@ -482,3 +482,20 @@ def update_employee_commissions(sender, instance, **kwargs):
                     commission_obj.amount = paid + (float(commission_obj.unpaid_amount) * float(exchange))
                     commission_obj.save()
 
+class Manager(models.Model):
+    name = models.CharField(max_length=100, blank = False, null = False)
+    employees = models.ManyToManyField(Employee, related_name='managers', blank = False, null = False)
+    commission_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # %
+
+
+    def __str__(self):
+        return self.name
+
+class ManagerCommissionPayment(models.Model):
+    manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='commission_payments')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    paid_at = models.DateTimeField(default=timezone.now)
+    note = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return f"Commission Payment {self.amount} to Manager {self.manager.name} at {self.paid_at}"
