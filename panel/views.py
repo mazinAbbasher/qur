@@ -1424,15 +1424,24 @@ def net_profit_dashboard(request):
     # print(filtered_shipments)
     # --- Inventory value calculation ---
     from .models import Inventory
-    inventory_value = 0
+    inventory_value_cost_only = 0
+    inventory_value_cost_plus_shipment = 0
+    inventory_value_sales_value = 0
     inventories = Inventory.objects.select_related('shipment', 'product').all()
     for inv in inventories:
         shipment = inv.shipment
         product = inv.product
-        # Calculate sale price in SDG for this inventory
+        # By Cost Only
+        if shipment and shipment.cost_sdg is not None:
+            inventory_value_cost_only += inv.quantity * shipment.cost_sdg
+        # By Cost + Shipment Allocation
+        if shipment and shipment.cost_sdg is not None and shipment.shipment_cost is not None and shipment.quantity > 0:
+            unit_cost_plus_shipment = float(shipment.cost_sdg) + (float(shipment.shipment_cost) / float(shipment.quantity))
+            inventory_value_cost_plus_shipment += inv.quantity * unit_cost_plus_shipment
+        # By Sales Value in SDG
         if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-            sale_price_sdg = shipment.cost_sdg
-            inventory_value += inv.quantity * sale_price_sdg
+            sales_value_sdg = float(shipment.sale_usd) * float(product.exchange_rate)
+            inventory_value_sales_value += inv.quantity * sales_value_sdg
     # --- End inventory value calculation ---
 
     net_profit = total_sales - (total_purchases + total_expenses + total_commissions)
@@ -1456,7 +1465,9 @@ def net_profit_dashboard(request):
         'start_date': start_date,
         'end_date': end_date,
         "active_sidebar": "net_profit",
-        'inventory_value': inventory_value,  # <-- new context variable
+        'inventory_value_cost_only': inventory_value_cost_only,
+        'inventory_value_cost_plus_shipment': inventory_value_cost_plus_shipment,
+        'inventory_value_sales_value': inventory_value_sales_value,
     })
 
 def invoice_list(request):
