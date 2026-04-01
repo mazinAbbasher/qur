@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <title>معاملات العميل - {{ client.name }}</title>
+</head>
+
+<body>
+    <div class="header">
+        <h2>تفاصيل المعاملات المالية للعميل: {{ client.name }}</h2>
+    </div>
+
+    <div style="margin-top: 20px;">
+        <table class="table">
+            <thead>
+                <tr style="background-color: #f8f9fa;">
+                    <th>التاريخ</th>
+                    <th>النوع</th>
+                    <th>رقم الفاتورة</th>
+                    <th>المبلغ</th>
+                    <th>الدفعة</th>
+                    <th>الرصيد بعد العملية</th>
+                    <th>ملاحظة</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% load humanize %}
+                {% for event in timeline %}
+                <tr>
+                    <td>{{ event.date|date:"Y-m-d H:i" }}</td>
+                    <td>
+                        {% if event.type == 'invoice' %}
+                        <span class="badge bg-primary">فاتورة</span>
+                        {% else %}
+                        <span class="badge bg-success">دفعة</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if event.invoice %}
+                        {{ event.invoice.number|default:event.invoice.pk }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if event.type == 'invoice' %}
+                        {{ event.amount|floatformat:2|intcomma }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if event.type == 'payment' %}
+                        {{ event.paid|floatformat:2|intcomma }}
+                        {% endif %}
+                    </td>
+                    <td dir="ltr">
+                        {{ event.balance|floatformat:2|intcomma }}
+                    </td>
+                    <td>{{ event.note }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" style="text-align: center;">لا توجد معاملات.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div style="margin-top: 20px; text-align: right; direction: rtl;">
+            <h3>إجمالي المبالغ غير المدفوعة: <span class="text-danger" dir="ltr">{{ total_unpaid|floatformat:2|intcomma }}</span></h3>
+        </div>
+    </div>
+</body>
+
+</html>

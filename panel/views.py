@@ -2170,6 +2170,84 @@ def client_detail(request, pk):
         "active_sidebar": "clients"
     })
 
+@require_GET
+def client_pdf(request, pk):
+    client = get_object_or_404(Client, pk=pk)
+    invoices = (
+        Invoice.objects
+        .filter(sale__client=client)
+        .select_related('sale')
+        .prefetch_related('payments')
+        .order_by('created_at')
+    )
+    timeline = []
+    for invoice in invoices:
+        timeline.append({
+            'type': 'invoice',
+            'date': invoice.created_at,
+            'invoice': invoice,
+            'amount': invoice.total,
+            'paid': 0,
+            'note': f"إنشاء فاتورة #{invoice.number or invoice.pk}",
+        })
+        for payment in invoice.payments.order_by('paid_at'):
+            timeline.append({
+                'type': 'payment',
+                'date': payment.paid_at,
+                'invoice': invoice,
+                'amount': -payment.amount,
+                'paid': payment.amount,
+                'note': f"دفعة على الفاتورة #{invoice.number or invoice.pk}",
+            })
+    timeline.sort(key=lambda x: x['date'])
+    balance = 0
+    for event in timeline:
+        if event['type'] == 'invoice':
+            balance += float(event['amount'])
+        elif event['type'] == 'payment':
+            balance -= float(event['paid'])
+        event['balance'] = balance
+    total_unpaid = sum(inv.remaining_amount for inv in invoices)
+
+    from django.template.loader import render_to_string
+    from weasyprint import HTML, CSS
+    import tempfile
+    import io
+    from django.http import FileResponse
+
+    html_string = render_to_string(
+        'panel/client_pdf.html',
+        {
+            'client': client,
+            'timeline': timeline,
+            'total_unpaid': total_unpaid,
+            'request': request,
+        }
+    )
+    pdf_css = """
+    body { font-family: 'Cairo', Arial, sans-serif; direction: rtl; }
+    .table { width: 100%; border-collapse: collapse; }
+    .table th, .table td { border: 1px solid #333; padding: 6px; text-align: right; }
+    .header { background: #007bff; color: #fff; padding: 12px; }
+    .badge { padding: 4px 8px; border-radius: 4px; }
+    .bg-primary { color: #007bff; }
+    .bg-success { color: #28a745; }
+    .text-danger { color: #dc3545; }
+    """
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(
+            output.name,
+            stylesheets=[CSS(string=pdf_css)]
+        )
+        output.seek(0)
+        pdf = output.read()
+    response = FileResponse(
+        io.BytesIO(pdf),
+        as_attachment=True,
+        filename=f'client_{client.pk}_transactions.pdf'
+    )
+    return response
+
 def debts_view(request):
     from decimal import Decimal
     today = timezone.now().date()

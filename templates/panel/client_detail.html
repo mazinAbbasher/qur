@@ -5,8 +5,18 @@
   <div class="row justify-content-center">
     <div class="col-md-10">
       <div class="card shadow">
-        <div class="card-header bg-info text-white">
-          <h5 class="mb-0 text-white">تفاصيل العميل: {{ client.name }}</h5>
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center shadow-sm rounded">
+  
+          <h5 class="mb-0 text-white">
+            تفاصيل العميل: <span class="fw-semibold text-white">{{ client.name }}</span>
+          </h5>
+
+          <a href="{% url 'panel:client_pdf' client.pk %}" 
+            class="btn btn-success d-flex align-items-center gap-2 px-3 py-2 shadow-sm rounded">
+            <i class="fas fa-file-pdf text-white"></i>
+            <span class="fw-medium">تحميل PDF</span>
+          </a>
+
         </div>
         <div class="card-body">
           <h6>المعاملات المالية</h6>

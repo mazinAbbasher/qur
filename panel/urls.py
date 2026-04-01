@@ -42,6 +42,7 @@ urlpatterns = [
     path('clients/<int:pk>/delete/', views.client_delete, name='client_delete'),
     path('clients/<int:pk>/detail/', views.client_detail, name='client_detail'),
     path('clients/export/pdf/', views.client_list_pdf, name='client_list_pdf'),
+    path('clients/<int:pk>/pdf/', views.client_pdf, name='client_pdf'),
 
     # Area URLs
     path('areas/', views.area_list, name='area_list'),

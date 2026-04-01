@@ -182,9 +182,39 @@
     border-color: #dc3545;
   }
 </style>
-<script src="{% static "assets/js/bootstrap.bundle.min.js" %}"></script>
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<style>
+  .select2-container .select2-selection--single {
+    height: 40px !important;
+    border: 1px solid #d2d6da !important;
+    border-radius: 0.375rem !important;
+    display: flex;
+    align-items: center;
+  }
+
+  .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 40px !important;
+    padding-right: 12px;
+  }
+
+  .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 38px !important;
+    left: 10px;
+    right: auto;
+  }
+</style>
+<script src="{% static " assets/js/bootstrap.bundle.min.js" %}"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof jQuery !== 'undefined') {
+      $('#id_client').select2({
+        dir: "rtl",
+        width: '100%',
+        placeholder: 'اختر العميل...'
+      });
+    }
   // Enable Bootstrap tooltips
   var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
   tooltipTriggerList.forEach(function (tooltipTriggerEl) {
