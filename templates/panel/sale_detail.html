@@ -7,25 +7,26 @@
       <h4 class="mb-0 text-white">تفاصيل البيع <span class="text-white-50">#{{ sale.pk }}</span></h4>
     </div>
     {% if messages %}
-            <ul class="messages">
-              {% for message in messages %}
-                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
-              {% endfor %}
-            </ul>
-          {% endif %}
+    <ul class="messages">
+      {% for message in messages %}
+      <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
     <div class="card-body">
       <div class="row mb-3">
         <div class="col-md-6">
           <p><strong>العميل:</strong>
             {% if sale.client %}
-              {{ sale.client.name }}
-              {% if sale.client.phone %}<span class="text-muted small">({{ sale.client.phone }})</span>{% endif %}
+            {{ sale.client.name }}
+            {% if sale.client.phone %}<span class="text-muted small">({{ sale.client.phone }})</span>{% endif %}
             {% else %}
-              <span class="text-muted">-</span>
+            <span class="text-muted">-</span>
             {% endif %}
           </p>
           <p><strong>العنوان:</strong>
-            {% if sale.client and sale.client.address %}{{ sale.client.address }}{% else %}<span class="text-muted">-</span>{% endif %}
+            {% if sale.client and sale.client.address %}{{ sale.client.address }}{% else %}<span
+              class="text-muted">-</span>{% endif %}
             {% if sale.client and sale.client.area %}- {{ sale.client.area.name }}{% endif %}
           </p>
         </div>
@@ -61,36 +62,36 @@
               <td>{{ item.inventory.product.name }}</td>
               <td>
                 {% if item.inventory.shipment.batch_number %}
-                  {{ item.inventory.shipment.batch_number }}
+                {{ item.inventory.shipment.batch_number }}
                 {% else %}
-                  <span class="text-muted">-</span>
+                <span class="text-muted">-</span>
                 {% endif %}
               </td>
               <td>
                 {{ item.quantity }}
                 {% if item.free_units > 0 %}
-                  <span class="badge bg-info text-white ms-1">+{{ item.free_units }} مجاني</span>
+                <span class="badge bg-info text-white ms-1">+{{ item.free_units }} مجاني</span>
                 {% endif %}
               </td>
               <td>
                 {% if item.price_discount > 0 %}
-                  <span class="text-decoration-line-through text-danger">{{ item.price|floatformat:2|intcomma }}</span>
-                  <span class="text-success fw-bold">{{ item.discounted_unit_price|floatformat:2|intcomma }}</span>
+                <span class="text-decoration-line-through text-danger">{{ item.price|floatformat:2|intcomma }}</span>
+                <span class="text-success fw-bold">{{ item.discounted_unit_price|floatformat:2|intcomma }}</span>
                 {% else %}
-                  {{ item.price|floatformat:2|intcomma }}
+                {{ item.price|floatformat:2|intcomma }}
                 {% endif %}
               </td>
               <td>{{ item.get_total|floatformat:2|intcomma }}</td>
               <td>
                 {% if item.free_goods_discount > 0 or item.price_discount > 0 %}
-                  {% if item.free_goods_discount > 0 %}
-                    <div>بضاعة مجانية: {{ item.free_goods_discount|floatformat:2 }}%</div>
-                  {% endif %}
-                  {% if item.price_discount > 0 %}
-                    <div>خصم سعر: {{ item.price_discount|floatformat:2 }}%</div>
-                  {% endif %}
+                {% if item.free_goods_discount > 0 %}
+                <div>بضاعة مجانية: {{ item.free_goods_discount|floatformat:2 }}%</div>
+                {% endif %}
+                {% if item.price_discount > 0 %}
+                <div>خصم سعر: {{ item.price_discount|floatformat:2 }}%</div>
+                {% endif %}
                 {% else %}
-                  <span class="text-muted">-</span>
+                <span class="text-muted">-</span>
                 {% endif %}
               </td>
             </tr>
@@ -108,10 +109,16 @@
           </tfoot>
         </table>
       </div>
-      <div class="mb-3 mt-3">
+      <div class="mb-3 mt-3 d-flex gap-2">
         <button class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#returnProductModal">
           <i class="bi bi-arrow-counterclockwise"></i> إرجاع منتج
         </button>
+        <a href="{% url 'panel:sale_edit' sale.pk %}" class="btn btn-outline-primary">
+          <i class="bi bi-pencil"></i> تعديل البيع
+        </a>
+        <a href="{% url 'panel:sale_delete' sale.pk %}" class="btn btn-outline-danger">
+          <i class="bi bi-trash"></i> حذف البيع
+        </a>
       </div>
       {% if returned_products %}
       <div class="mt-3">
@@ -146,7 +153,8 @@
           <h6 class="mb-0">الفاتورة</h6>
         </div>
         <div class="card-body">
-          <p><strong>الإجمالي:</strong> <span class="text-success">{{ invoice.sale.total|floatformat:2|intcomma }} SDG</span></p>
+          <p><strong>الإجمالي:</strong> <span class="text-success">{{ invoice.sale.total|floatformat:2|intcomma }}
+              SDG</span></p>
           <p><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d" }}</p>
           <p>
             <strong>المدفوع:</strong>
@@ -159,64 +167,66 @@
           </p>
           <p><strong>الحالة:</strong>
             {% if invoice.status == 'paid' %}
-              <span class="badge bg-success">مدفوعة</span>
+            <span class="badge bg-success">مدفوعة</span>
             {% elif invoice.status == 'partial' %}
-              <span class="badge bg-warning text-dark">مدفوعة جزئياً</span>
+            <span class="badge bg-warning text-dark">مدفوعة جزئياً</span>
             {% else %}
-              <span class="badge bg-danger">غير مدفوعة</span>
+            <span class="badge bg-danger">غير مدفوعة</span>
             {% endif %}
           </p>
           {% if invoice.file_path %}
-            <p><a href="{{ invoice.file_path }}"  class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> تحميل الفاتورة</a></p>
+          <p><a href="{{ invoice.file_path }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i>
+              تحميل الفاتورة</a></p>
           {% endif %}
           {% if invoice.payments.exists %}
-            <div class="mt-4">
-              <h6>سجل الدفعات</h6>
-              <table class="table table-sm table-bordered">
-                <thead>
-                  <tr>
-                    <th>التاريخ</th>
-                    <th>المبلغ</th>
-                    <th>ملاحظة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for p in invoice.payments.all %}
-                  <tr>
-                    <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
-                    <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
-                    <td>{{ p.note|default:"-" }}</td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
+          <div class="mt-4">
+            <h6>سجل الدفعات</h6>
+            <table class="table table-sm table-bordered">
+              <thead>
+                <tr>
+                  <th>التاريخ</th>
+                  <th>المبلغ</th>
+                  <th>ملاحظة</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in invoice.payments.all %}
+                <tr>
+                  <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
+                  <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
+                  <td>{{ p.note|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
           {% endif %}
           {% if invoice.status != 'paid' %}
-            <div class="mt-4">
-              <h6>إضافة دفعة جديدة</h6>
-              <form method="post" action="{% url 'panel:invoice_add_payment' invoice.pk %}">
-                {% csrf_token %}
-                <div class="row g-2 align-items-end">
-                  <div class="col-md-4">
-                    <input type="number" name="amount" class="form-control" min="1" max="{{ invoice.remaining_amount }}" step="0.01" required placeholder="المبلغ">
-                  </div>
-                  <div class="col-md-5">
-                    <input type="text" name="note" class="form-control" placeholder="ملاحظة (اختياري)">
-                  </div>
-                  <div class="col-md-3">
-                    <button type="submit" class="btn btn-primary">إضافة دفعة</button>
-                  </div>
+          <div class="mt-4">
+            <h6>إضافة دفعة جديدة</h6>
+            <form method="post" action="{% url 'panel:invoice_add_payment' invoice.pk %}">
+              {% csrf_token %}
+              <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                  <input type="number" name="amount" class="form-control" min="1" max="{{ invoice.remaining_amount }}"
+                    step="0.01" required placeholder="المبلغ">
                 </div>
-              </form>
-              <form method="post" action="{% url 'panel:invoice_mark_paid' invoice.pk %}" class="mt-2">
-                {% csrf_token %}
-                <button type="submit" class="btn btn-success">تحديد كمدفوعة</button>
-              </form>
-            </div>
+                <div class="col-md-5">
+                  <input type="text" name="note" class="form-control" placeholder="ملاحظة (اختياري)">
+                </div>
+                <div class="col-md-3">
+                  <button type="submit" class="btn btn-primary">إضافة دفعة</button>
+                </div>
+              </div>
+            </form>
+            <form method="post" action="{% url 'panel:invoice_mark_paid' invoice.pk %}" class="mt-2">
+              {% csrf_token %}
+              <button type="submit" class="btn btn-success">تحديد كمدفوعة</button>
+            </form>
+          </div>
           {% endif %}
           <div class="mt-4">
-            <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" >
+            <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary">
               تحميل PDF
             </a>
           </div>
@@ -228,7 +238,8 @@
     </div>
   </div>
   <!-- Return Product Modal -->
-  <div class="modal fade" id="returnProductModal" tabindex="-1" aria-labelledby="returnProductModalLabel" aria-hidden="true">
+  <div class="modal fade" id="returnProductModal" tabindex="-1" aria-labelledby="returnProductModalLabel"
+    aria-hidden="true">
     <div class="modal-dialog">
       <form method="post" action="{% url 'panel:sale_return_product' sale.pk %}" id="returnProductForm">
         {% csrf_token %}
@@ -243,29 +254,25 @@
               <select name="sale_item" id="id_sale_item" class="form-select" required>
                 <option value="">اختر العنصر</option>
                 {% for item in sale.items.all %}
-                  <option value="{{ item.id }}" data-max="{{ item.quantity }}">
-                    {{ item.inventory.product.name }} ({{ item.quantity }})
-                    {% if item.inventory.shipment.batch_number %}
-                      - تشغيلة: {{ item.inventory.shipment.batch_number }}
-                    {% endif %}
-                  </option>
+                <option value="{{ item.id }}" data-max="{{ item.quantity }}">
+                  {{ item.inventory.product.name }} ({{ item.quantity }})
+                  {% if item.inventory.shipment.batch_number %}
+                  - تشغيلة: {{ item.inventory.shipment.batch_number }}
+                  {% endif %}
+                </option>
                 {% endfor %}
               </select>
             </div>
             <div class="mb-3">
               {{ return_form.quantity.label_tag }}
-              <input type="number" name="quantity" id="id_quantity" class="form-control"
-                min="1"
-                max="1"
-                required
-              >
+              <input type="number" name="quantity" id="id_quantity" class="form-control" min="1" max="1" required>
             </div>
             <div class="mb-3">
               {{ return_form.note.label_tag }}
               {{ return_form.note }}
             </div>
             {% if return_form.non_field_errors %}
-              <div class="alert alert-danger">{{ return_form.non_field_errors }}</div>
+            <div class="alert alert-danger">{{ return_form.non_field_errors }}</div>
             {% endif %}
           </div>
           <div class="modal-footer">
@@ -277,26 +284,27 @@
     </div>
   </div>
   <div class="text-center">
-    <a href="{% url 'panel:sale_list' %}" class="btn btn-secondary mt-2"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
+    <a href="{% url 'panel:sale_list' %}" class="btn btn-secondary mt-2"><i class="bi bi-arrow-right"></i> العودة
+      للقائمة</a>
   </div>
 </div>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  var saleItemSelect = document.getElementById("id_sale_item");
-  var qtyInput = document.getElementById("id_quantity");
+  document.addEventListener('DOMContentLoaded', function () {
+    var saleItemSelect = document.getElementById("id_sale_item");
+    var qtyInput = document.getElementById("id_quantity");
 
-  function updateMaxQty() {
-    var selectedOption = saleItemSelect.options[saleItemSelect.selectedIndex];
-    var maxQty = selectedOption ? selectedOption.getAttribute('data-max') : "1";
-    qtyInput.value = "";
-    qtyInput.setAttribute('max', maxQty || "1");
-  }
+    function updateMaxQty() {
+      var selectedOption = saleItemSelect.options[saleItemSelect.selectedIndex];
+      var maxQty = selectedOption ? selectedOption.getAttribute('data-max') : "1";
+      qtyInput.value = "";
+      qtyInput.setAttribute('max', maxQty || "1");
+    }
 
-  if (saleItemSelect && qtyInput) {
-    saleItemSelect.addEventListener('change', updateMaxQty);
-    // Set initial max on page load
-    updateMaxQty();
-  }
-});
+    if (saleItemSelect && qtyInput) {
+      saleItemSelect.addEventListener('change', updateMaxQty);
+      // Set initial max on page load
+      updateMaxQty();
+    }
+  });
 </script>
 {% endblock %}

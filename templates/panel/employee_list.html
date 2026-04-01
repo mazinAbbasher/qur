@@ -54,7 +54,7 @@
                   <td class="px-4 py-2">{{ row.employee.name }}</td>
                   <td class="px-4 py-2">{{ row.monthly_sales|floatformat:2|intcomma }}</td>
                   {% comment %} <td class="px-4 py-2">{{ row.sales_target|floatformat:2|intcomma }}</td> {% endcomment %}
-                  <td class="px-4 py-2">{{ row.commission_percentage|floatformat:0 }}%</td>
+                  <td class="px-4 py-2">{{ row.commission_percentage|floatformat:2 }}%</td>
                   <td class="px-4 py-2">{{ row.commission_amount|floatformat:0|intcomma }}</td>
                   <td class="px-4 py-2 text-danger font-bold">{{ row.unpaid_commission|floatformat:2|intcomma }}</td>
                   <td class="px-4 py-2">

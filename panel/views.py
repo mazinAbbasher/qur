@@ -414,6 +414,10 @@ class SaleItemForm(forms.ModelForm):
         self.fields['price'].widget.attrs['readonly'] = True
         self.fields['price'].widget.attrs['tabindex'] = -1
         self.fields['price'].widget.attrs['class'] = self.fields['price'].widget.attrs.get('class', '') + ' bg-light'
+        # same for quantity in bg light 
+        # self.fields['quantity'].widget.attrs['readonly'] = True
+        # self.fields['quantity'].widget.attrs['tabindex'] = -1
+        self.fields['quantity'].widget.attrs['class'] = self.fields['quantity'].widget.attrs.get('class', '') + ' bg-light'
         # Set default discount values if not set
         self.fields['free_goods_discount'].initial = self.instance.free_goods_discount or 0
         self.fields['price_discount'].initial = self.instance.price_discount or 0
@@ -631,6 +635,213 @@ def sale_detail(request, pk):
         'invoice': invoice,
         'returned_products': returned_products,
         'return_form': return_form,
+        "active_sidebar": "sales"
+    })
+
+def sale_delete(request, pk):
+    sale = get_object_or_404(Sale, pk=pk)
+    invoice = getattr(sale, 'invoice', None)
+    can_delete = True
+    errors = []
+
+    if invoice and invoice.paid_amount > 0:
+        can_delete = False
+        errors.append("لا يمكن حذف فاتورة تم سداد جزء منها. الرجاء حذف المدفوعات أولاً.")
+
+    commission = Commission.objects.filter(sale=sale).first()
+    if commission and commission.paid_amount > 0:
+        can_delete = False
+        errors.append("لا يمكن حذف فاتورة تم دفع عمولتها للمندوب.")
+
+    if request.method == 'POST':
+        if not can_delete:
+            for error in errors:
+                messages.error(request, error)
+            return redirect('panel:sale_detail', pk=sale.pk)
+
+        from django.db import transaction
+        with transaction.atomic():
+            # Revert inventory (Net of what was originally sold minus returned)
+            for item in sale.items.all():
+                returned_qty = sum(rp.quantity for rp in item.returns.all())
+                net_to_restore = (item.quantity + item.free_units) - returned_qty
+                item.inventory.quantity += net_to_restore
+                item.inventory.save()
+            sale.delete()
+        messages.success(request, "تم حذف الفاتورة بنجاح واسترجاع الكميات للمخزن.")
+        return redirect('panel:sale_list')
+
+    return render(request, 'sales/sale_confirm_delete.html', {
+        'sale': sale,
+        'can_delete': can_delete,
+        'errors': errors,
+        "active_sidebar": "sales"
+    })
+
+def sale_edit(request, pk):
+    sale = get_object_or_404(Sale, pk=pk)
+    invoice = getattr(sale, 'invoice', None)
+
+    commission = Commission.objects.filter(sale=sale).first()
+    if commission and commission.paid_amount > 0:
+        messages.error(request, "لا يمكن تعديل فاتورة تم دفع عمولتها جزئياً للمندوب. قم بإلغاء دفع العمولة أولا.")
+        return redirect('panel:sale_detail', pk=sale.pk)
+
+    latest_rate = ExchangeRate.objects.order_by('-updated_at').first()
+    products = Product.objects.all()
+
+    # Include inventories with qty > 0 OR inventories that are part of this sale
+    from django.db import models
+    inventories = Inventory.objects.filter(models.Q(quantity__gt=0) | models.Q(saleitem__sale=sale)).select_related('product', 'shipment').distinct()
+
+    inventories_by_product = defaultdict(list)
+    for inv in inventories:
+        # Avoid duplicate appending if any
+        if inv not in inventories_by_product[inv.product.pk]:
+            inventories_by_product[inv.product.pk].append(inv)
+    products_with_batches = [p for p in products if inventories_by_product.get(p.pk)]
+
+    if request.method == 'POST':
+        sale_form = SaleForm(request.POST, instance=sale)
+        post_data = request.POST.copy()
+        
+        total_forms = int(post_data.get('items-TOTAL_FORMS', 0))
+        for i in range(total_forms):
+            prefix = f'items-{i}'
+            product_id = post_data.get(f'{prefix}-product')
+            batch_id = post_data.get(f'{prefix}-batch')
+            free_goods_discount = post_data.get(f'{prefix}-free_goods_discount', 0)
+            price_discount = post_data.get(f'{prefix}-price_discount', 0)
+            post_data[f'{prefix}-free_goods_discount'] = free_goods_discount or 0
+            post_data[f'{prefix}-price_discount'] = price_discount or 0
+            
+            if batch_id:
+                post_data[f'{prefix}-inventory'] = batch_id
+            if product_id and batch_id:
+                try:
+                    inv = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
+                    shipment = inv.shipment
+                    product = inv.product
+                    if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
+                        base_price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                        if price_discount and float(price_discount) > 0:
+                            price = base_price * (1 - float(price_discount) / 100)
+                        else:
+                            price = base_price
+                        post_data[f'{prefix}-price'] = str(round(price, 2))
+                    else:
+                        post_data[f'{prefix}-price'] = "0"
+                except (Inventory.DoesNotExist, Product.DoesNotExist, AttributeError):
+                    post_data[f'{prefix}-price'] = "0"
+            else:
+                post_data[f'{prefix}-price'] = "0"
+                
+        formset = SaleItemFormSet(post_data, instance=sale)
+
+        if sale_form.is_valid() and formset.is_valid():
+            try:
+                from django.db import transaction
+                with transaction.atomic():
+                    # Temporarily revert inventory for old items
+                    for item in sale.items.all():
+                        returned_qty = sum(rp.quantity for rp in item.returns.all())
+                        net_to_restore = (item.quantity + item.free_units) - returned_qty
+                        item.inventory.quantity += net_to_restore
+                        item.inventory.save()
+
+                    saved_sale = sale_form.save()
+                    sale_items = formset.save(commit=False)
+                    
+                    total = 0
+                    for form in formset.forms:
+                        if form.cleaned_data.get('DELETE', False):
+                            continue
+                        prefix = form.prefix
+                        batch_id = request.POST.get(f"{prefix}-batch")
+                        if not batch_id:
+                            raise ValueError("يجب اختيار دفعة لكل منتج.")
+                        inv = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
+                        form.instance.inventory = inv
+                        
+                        shipment = inv.shipment
+                        product = inv.product
+                        if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
+                            form.instance.price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                        else:
+                            form.instance.price = 0
+                            
+                        form.instance.free_goods_discount = float(form.cleaned_data.get('free_goods_discount') or 0)
+                        form.instance.price_discount = float(form.cleaned_data.get('price_discount') or 0)
+                        
+                    for obj in formset.deleted_objects:
+                        obj.delete()
+                    
+                    for item in sale_items:
+                        total_units = item.quantity + item.free_units
+                        returned_qty = 0
+                        if item.pk:
+                            returned_qty = sum(rp.quantity for rp in item.returns.all())
+                        
+                        if total_units < returned_qty:
+                            raise ValueError(f"كمية الصنف {item.inventory.product.name} لا يمكن أن تكون أقل من ما تم إرجاعه ({returned_qty}).")
+
+                        net_to_deduct = total_units - returned_qty
+                        item.inventory.quantity -= net_to_deduct
+                        if item.inventory.quantity < 0:
+                            raise ValueError(f"كمية غير كافية في الدفعة للمنتج {item.inventory.product.name}")
+                        item.inventory.save()
+                        item.save()
+                        total += item.get_total
+                        
+                    saved_sale.total = total
+                    saved_sale.save()
+                    formset.save_m2m()
+                    saved_sale.calculate_total()
+                    total = saved_sale.total
+
+                    if invoice and invoice.paid_amount > total and total > 0:
+                        raise ValueError("لا يمكن تقليل الإجمالي ليكون أقل من المبلغ المدفوع مسبقاً.")
+
+                    employee = saved_sale.employee
+                    if employee and getattr(employee, 'commission_percentage', 0):
+                        commission_percentage = float(employee.commission_percentage)
+                        commission_amount = float(total or 0) * (commission_percentage / 100)
+                        Commission.objects.update_or_create(
+                            employee=employee, sale=saved_sale,
+                            defaults={'amount': commission_amount}
+                        )
+
+                    if invoice:
+                        invoice.total = total
+                        invoice.due_date = sale_form.cleaned_data['due_date']
+                        invoice.save()
+                        invoice.update_status()
+
+                messages.success(request, "تم تعديل الفاتورة بنجاح.")
+                return redirect('panel:sale_detail', pk=saved_sale.pk)
+            except ValueError as e:
+                messages.error(request, str(e))
+                # The exception will cancel the transaction, inventory is preserved in DB.
+            except Exception as e:
+                print("Error saving edited sale:", e)
+                messages.error(request, "حدث خطأ غير متوقع أثناء الحفظ.")
+        else:
+            messages.error(request, "حدث خطأ في البيانات المدخلة. يرجى مراجعة الحقول.")
+            print(sale_form.errors)
+            print(formset.errors)
+    else:
+        sale_form = SaleForm(instance=sale)
+        formset = SaleItemFormSet(instance=sale)
+
+    return render(request, 'sales/sale_form.html', {
+        'sale': sale,
+        'sale_form': sale_form,
+        'formset': formset,
+        'latest_rate': latest_rate,
+        'products': products,
+        'inventories': inventories,
+        'products_with_batches': products_with_batches,
+        'inventories_by_product': inventories_by_product,
         "active_sidebar": "sales"
     })
 

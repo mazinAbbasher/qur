@@ -54,6 +54,7 @@
                       {% for form in formset.forms %}
                       {% with inv=form.instance.inventory %}
                       <tr class="saleitem-row" data-form-index="{{ forloop.counter0 }}">
+                        {{ form.id.as_hidden }}
                         <td>
                           <select name="{{ form.prefix }}-product" class="form-select product-select" required>
                             <option value="" disabled {% if not inv %}selected{% endif %}>اختر المنتج</option>
@@ -85,18 +86,18 @@
                           <small class="text-muted">اختر الدفعة بعد اختيار المنتج</small>
                         </td>
                         <td>
-                          <input type="text" class="form-control expiry-date bg-white" value="{% if inv %}{{ inv.shipment.expiry_date }}{% else %}-{% endif %}" readonly>
+                          <input type="text" class="form-control expiry-date" value="{% if inv %}{{ inv.shipment.expiry_date }}{% else %}-{% endif %}" readonly>
                         </td>
                         <td>
                           <div class="input-group">
                             {{ form.quantity }}
-                            <span class="input-group-text">وحدة</span>
+                            <!-- <span class="input-group-text">وحدة</span> -->
                           </div>
                         </td>
                         <td>
                           <div class="input-group">
                             {{ form.price }}
-                            <span class="input-group-text">جنيه</span>
+                            <!-- <span class="input-group-text">جنيه</span> -->
                           </div>
                         </td>
                         <td>
@@ -105,7 +106,7 @@
                         <td>
                           {{ form.price_discount }}
                         </td>
-                        <td class="item-total text-success fw-bold text-center">
+                        <td class="item-total text-center">
                           {% if form.instance.pk %}
                             {{ form.instance.get_total }}
                           {% else %}
@@ -113,11 +114,13 @@
                           {% endif %}
                         </td>
                         <td class="text-center">
-                          <button type="button" class="btn btn-danger btn-sm remove-saleitem" title="حذف">
+                          <!-- <button type="button" class="btn btn-danger btn-sm remove-saleitem" title="حذف">
                             <i class="bi bi-trash"></i>
-                          </button>
+                          </button> -->
                           {% if form.DELETE %}
-                            {{ form.DELETE }}
+                          <button type="button" class="btn btn-danger btn-sm remove-saleitem">
+                            حذف
+                          </button>       
                           {% endif %}
                         </td>
                       </tr>

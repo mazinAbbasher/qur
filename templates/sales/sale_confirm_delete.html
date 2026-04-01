@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card border-danger shadow">
+        <div class="card-header bg-danger text-white">
+          <h5 class="mb-0"><i class="bi bi-exclamation-triangle-fill"></i> تأكيد الحذف</h5>
+        </div>
+        <div class="card-body">
+          {% if not can_delete %}
+          <div class="alert alert-danger">
+            <h5 class="alert-heading">لا يمكن حذف هذه الفاتورة للأسباب التالية:</h5>
+            <ul>
+              {% for error in errors %}
+              <li>{{ error }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+          <div class="text-center mt-4">
+            <a href="{% url 'panel:sale_detail' sale.pk %}" class="btn btn-secondary px-4">رجوع للتفاصيل</a>
+          </div>
+          {% else %}
+          <p class="fs-5 text-center mb-4">
+            هل أنت متأكد من رغبتك في حذف فاتورة البيع <strong class="text-danger">#{{ sale.pk }}</strong> بشكل
+            نهائي؟<br>
+            <span class="text-muted fs-6">العميل: {{ sale.client.name|default:"-" }} | الإجمالي: {{ sale.total }}
+              جنيه</span>
+          </p>
+          <div class="alert alert-warning">
+            <i class="bi bi-info-circle-fill"></i> سيؤدي الحذف إلى:
+            <ul class="mb-0 mt-2">
+              <li>إرجاع جميع كميات المنتجات المباعة (الصافية بعد حساب المرتجعات) إلى المخزون.</li>
+              <li>حذف الفاتورة وأي مرتجعات أو عمولات مرتبطة لم يتم سدادها بعد.</li>
+            </ul>
+          </div>
+          <form method="post" class="d-flex justify-content-center gap-3 mt-4">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger px-4">
+              <i class="bi bi-trash"></i> تأكيد الحذف
+            </button>
+            <a href="{% url 'panel:sale_detail' sale.pk %}" class="btn btn-secondary px-4">
+              إلغاء
+            </a>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
