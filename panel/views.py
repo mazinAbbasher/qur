@@ -2214,6 +2214,9 @@ def client_pdf(request, pk):
     import tempfile
     import io
     from django.http import FileResponse
+    from datetime import date
+
+    logo_url = request.build_absolute_uri('/static/logo.png')
 
     html_string = render_to_string(
         'panel/client_pdf.html',
@@ -2221,6 +2224,8 @@ def client_pdf(request, pk):
             'client': client,
             'timeline': timeline,
             'total_unpaid': total_unpaid,
+            'today': date.today(),
+            'logo_url': logo_url,
             'request': request,
         }
     )

@@ -4,68 +4,218 @@
 <head>
     <meta charset="UTF-8">
     <title>معاملات العميل - {{ client.name }}</title>
+    <style>
+        body {
+            font-family: 'Cairo', Arial, sans-serif;
+            direction: rtl;
+            color: #222;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+        }
+
+        .invoice-container {
+            max-width: 700px;
+            margin: 40px auto;
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 0 0 24px 0;
+        }
+
+        .my-header {
+            padding: 32px 32px 16px 32px;
+            border-bottom: 1px solid #bbb;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+
+        .company-logo {
+            height: 70px;
+            width: auto;
+            object-fit: contain;
+            margin-left: 24px;
+        }
+
+        .company-details {
+            flex: 1;
+            text-align: right;
+        }
+
+        .company-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-top: 1.1em;
+        }
+
+        .title-block {
+            text-align: left;
+        }
+
+        .title {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 0.2em;
+            margin-top: 0.6em;
+        }
+
+        .subtitle {
+            font-size: 1em;
+            color: #666;
+            margin-bottom: 4px;
+        }
+
+        .date {
+            font-size: 0.95em;
+            color: #444;
+            margin-bottom: 0;
+        }
+
+        .table-container {
+            margin: 0 32px;
+        }
+
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .table th,
+        .table td {
+            border: 1px solid #eee;
+            padding: 8px 4px;
+            text-align: right;
+            font-size: 1em;
+        }
+
+        .table th {
+            background: #f8f9fa;
+            font-weight: bold;
+            border-bottom: 2px solid #bbb;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 0.95em;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .bg-primary {
+            background: #007bff;
+            color: #fff;
+        }
+
+        .bg-success {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .text-danger {
+            color: #dc3545;
+        }
+
+        .footer {
+            margin-top: 36px;
+            font-size: 0.95em;
+            color: #888;
+            text-align: center;
+            padding: 18px 0 0 0;
+            border-top: 1px solid #bbb;
+            background: #fff;
+        }
+
+        @page {
+            margin: 32px 24px 32px 24px;
+
+            @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 0.9em;
+                color: #888;
+            }
+        }
+    </style>
 </head>
 
 <body>
-    <div class="header">
-        <h2>تفاصيل المعاملات المالية للعميل: {{ client.name }}</h2>
-    </div>
+    <div class="invoice-container">
+        <div class="my-header">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" class="company-logo" alt="Logo">
+            {% endif %}
+            <div class="company-details">
+                <div class="company-name">Equarorial medical Ltd</div>
+            </div>
+            <div class="title-block">
+                <div class="title">كشف حساب العميل</div>
+                <div class="subtitle">{{ client.name }}</div>
+                <div class="date">التاريخ: {{ today|date:"Y-m-d" }}</div>
+            </div>
+        </div>
 
-    <div style="margin-top: 20px;">
-        <table class="table">
-            <thead>
-                <tr style="background-color: #f8f9fa;">
-                    <th>التاريخ</th>
-                    <th>النوع</th>
-                    <th>رقم الفاتورة</th>
-                    <th>المبلغ</th>
-                    <th>الدفعة</th>
-                    <th>الرصيد بعد العملية</th>
-                    <th>ملاحظة</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% load humanize %}
-                {% for event in timeline %}
-                <tr>
-                    <td>{{ event.date|date:"Y-m-d H:i" }}</td>
-                    <td>
-                        {% if event.type == 'invoice' %}
-                        <span class="badge bg-primary">فاتورة</span>
-                        {% else %}
-                        <span class="badge bg-success">دفعة</span>
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if event.invoice %}
-                        {{ event.invoice.number|default:event.invoice.pk }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if event.type == 'invoice' %}
-                        {{ event.amount|floatformat:2|intcomma }}
-                        {% endif %}
-                    </td>
-                    <td>
-                        {% if event.type == 'payment' %}
-                        {{ event.paid|floatformat:2|intcomma }}
-                        {% endif %}
-                    </td>
-                    <td dir="ltr">
-                        {{ event.balance|floatformat:2|intcomma }}
-                    </td>
-                    <td>{{ event.note }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="7" style="text-align: center;">لا توجد معاملات.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-container">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>التاريخ</th>
+                        <th>النوع</th>
+                        <th>رقم الفاتورة</th>
+                        <th>المبلغ</th>
+                        <th>الدفعة</th>
+                        <th>الرصيد بعد العملية</th>
+                        <th>ملاحظة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% load humanize %}
+                    {% for event in timeline %}
+                    <tr>
+                        <td>{{ event.date|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            {% if event.type == 'invoice' %}
+                            <span class="badge bg-primary">فاتورة</span>
+                            {% else %}
+                            <span class="badge bg-success">دفعة</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if event.invoice %}
+                            {{ event.invoice.number|default:event.invoice.pk }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if event.type == 'invoice' %}
+                            {{ event.amount|floatformat:2|intcomma }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if event.type == 'payment' %}
+                            {{ event.paid|floatformat:2|intcomma }}
+                            {% endif %}
+                        </td>
+                        <td dir="ltr">
+                            {{ event.balance|floatformat:2|intcomma }}
+                        </td>
+                        <td>{{ event.note }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" style="text-align: center;">لا توجد معاملات.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
 
-        <div style="margin-top: 20px; text-align: right; direction: rtl;">
-            <h3>إجمالي المبالغ غير المدفوعة: <span class="text-danger" dir="ltr">{{ total_unpaid|floatformat:2|intcomma }}</span></h3>
+            <div style="margin-top: 20px; text-align: right;">
+                <h3>إجمالي المبالغ غير المدفوعة: <span class="text-danger" dir="ltr">{{ total_unpaid|floatformat:2|intcomma }}</span></h3>
+            </div>
+        </div>
+        <div class="footer">
+            Equarorial medical Ltd &mdash; All rights reserved &copy; {{ today|date:"Y" }}<br>
+            تم توليد التقرير آلياً بواسطة النظام
         </div>
     </div>
 </body>
