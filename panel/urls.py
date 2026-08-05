@@ -9,6 +9,8 @@ urlpatterns = [
     path('products/add/', views.product_add, name='product_add'),
     path('products/<int:pk>/edit/', views.product_edit, name='product_edit'),
     path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
+    path('products/<int:pk>/stock-movement/', views.product_stock_movement, name='product_stock_movement'),
+    path('products/<int:pk>/stock-movement/pdf/', views.product_stock_movement_pdf, name='product_stock_movement_pdf'),
     path('products/<int:pk>/', views.product_detail, name='product_detail'),
 
     # Sales URLs

@@ -190,95 +190,273 @@ def product_delete(request, pk):
     # })
 
 def product_detail(request, pk):
-    from .models import Product, Shipment, Inventory, SaleItem, Sale, Client
+    from .models import Product, Shipment, Inventory, SaleItem, Client
+    from django.db.models import Sum, Avg
     product = get_object_or_404(Product, pk=pk)
 
-    # Purchase history (shipments)
-    shipments = (
-        Shipment.objects
-        .filter(product=product)
-        .order_by('-received_at')
-    )
-
-    # Sales history (sale items)
-    sale_items = (
-        SaleItem.objects
-        .filter(inventory__product=product)
-        .select_related('sale', 'inventory', 'sale__client')
-        .order_by('-sale__created_at')
-    )
-
-    # Stock movement timeline (inbound: shipments, outbound: sales)
-    timeline = []
-    for shipment in shipments:
-        timeline.append({
-            'type': 'in',
-            'date': shipment.received_at,
-            'quantity': shipment.quantity,
-            'note': f"شراء {shipment.quantity} وحدة (تشغيلة {shipment.batch_number})",
-            'related': shipment,
-        })
-    for item in sale_items:
-        timeline.append({
-            'type': 'out',
-            'date': item.sale.created_at,
-            'quantity': item.quantity,
-            'note': f"بيع {item.quantity} وحدة للعميل {item.sale.client.name if item.sale.client else ''}",
-            'related': item,
-        })
-    timeline.sort(key=lambda x: x['date'])
-
     # Current stock level (sum of all inventories for this product)
-    from django.db.models import Sum
     current_stock = Inventory.objects.filter(product=product).aggregate(total=Sum('quantity'))['total'] or 0
 
-    # Purchase and sale prices over time
-    purchase_prices = [
-        {'date': s.received_at, 'cost_usd': s.cost_usd, 'cost_sdg': s.cost_sdg, 'batch': s.batch_number}
-        for s in shipments
-    ]
-    sale_prices = [
-        {'date': si.sale.created_at, 'price': si.price, 'quantity': si.quantity, 'client': si.sale.client.name if si.sale.client else '', 'batch': si.inventory.shipment.batch_number}
-        for si in sale_items
-    ]
+    # Purchase history (shipments) — kept as a concise overview on this page.
+    shipments = Shipment.objects.filter(product=product).order_by('-received_at')
 
-    # Suppliers: If you have a supplier model, link here. For now, just show "N/A".
-    suppliers = ["N/A"]  # Placeholder
+    # Batches currently in stock
+    inventories = (
+        Inventory.objects
+        .filter(product=product, quantity__gt=0)
+        .select_related('shipment')
+        .order_by('shipment__expiry_date')
+    )
 
-    # Customers associated with sales
+    # Aggregate figures for the summary cards
+    sale_items = SaleItem.objects.filter(inventory__product=product)
+    total_sold = sale_items.aggregate(total=Sum('quantity'))['total'] or 0
+    total_purchased = shipments.aggregate(total=Sum('quantity'))['total'] or 0
+    last_shipment = shipments.first()
+    latest_sale_price = last_shipment.sale_price_sdg if last_shipment else 0
+    latest_cost_sdg = last_shipment.cost_sdg if last_shipment else 0
+
+    # Customers associated with sales of this product
     customers = (
         Client.objects
         .filter(sale__items__inventory__product=product)
         .distinct()
     )
 
-    # Notes/activities: Use timeline for now
-    notes = timeline  # Could be extended with a dedicated notes model
-
     return render(request, 'products/product_detail.html', {
         'product': product,
         'shipments': shipments,
-        'sale_items': sale_items,
-        'timeline': timeline,
+        'inventories': inventories,
         'current_stock': current_stock,
-        'purchase_prices': purchase_prices,
-        'sale_prices': sale_prices,
-        'suppliers': suppliers,
+        'total_sold': total_sold,
+        'total_purchased': total_purchased,
+        'latest_sale_price': latest_sale_price,
+        'latest_cost_sdg': latest_cost_sdg,
         'customers': customers,
-        'notes': notes,
         "active_sidebar": "products"
     })
+
+
+def _build_stock_movement_context(request, product):
+    """Build the filtered stock-movement context for a product.
+
+    Shared by the on-screen page and the PDF export so both apply identical
+    filters. Combines inbound events (shipments received, sale returns) and
+    outbound events (sales, lost stock) into one timeline, filtered by date
+    range, city (area), employee and client.
+    """
+    from .models import Shipment, SaleItem, ReturnedProduct, LostProduct, Client, Area, Employee
+    from datetime import datetime
+
+    # --- Read filters ---
+    date_from = request.GET.get('date_from') or ''
+    date_to = request.GET.get('date_to') or ''
+    area_id = request.GET.get('area') or ''
+    employee_id = request.GET.get('employee') or ''
+    client_id = request.GET.get('client') or ''
+
+    def parse_date(value):
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return None
+
+    d_from = parse_date(date_from)
+    d_to = parse_date(date_to)
+
+    # When any party filter (city/employee/client) is set, purely-inbound events
+    # that have no such attribution (shipments, lost stock) are excluded.
+    party_filter_active = bool(area_id or employee_id or client_id)
+
+    # --- Outbound: sale items ---
+    sale_items = (
+        SaleItem.objects
+        .filter(inventory__product=product)
+        .select_related('sale', 'sale__client', 'sale__client__area', 'sale__employee', 'inventory__shipment')
+    )
+    if area_id:
+        sale_items = sale_items.filter(sale__client__area_id=area_id)
+    if employee_id:
+        sale_items = sale_items.filter(sale__employee_id=employee_id)
+    if client_id:
+        sale_items = sale_items.filter(sale__client_id=client_id)
+
+    # --- Inbound: sale returns ---
+    returns = (
+        ReturnedProduct.objects
+        .filter(sale_item__inventory__product=product)
+        .select_related('sale', 'sale__client', 'sale__client__area', 'sale__employee', 'sale_item__inventory__shipment')
+    )
+    if area_id:
+        returns = returns.filter(sale__client__area_id=area_id)
+    if employee_id:
+        returns = returns.filter(sale__employee_id=employee_id)
+    if client_id:
+        returns = returns.filter(sale__client_id=client_id)
+
+    # --- Inbound: shipments / Outbound: lost stock (no party attribution) ---
+    shipments = Shipment.objects.filter(product=product).select_related('supplier')
+    lost = LostProduct.objects.filter(product=product).select_related('inventory__shipment')
+
+    movements = []
+
+    for item in sale_items:
+        sale = item.sale
+        movements.append({
+            'date': sale.created_at,
+            'direction': 'out',
+            'type': 'بيع',
+            'quantity': item.quantity,
+            'batch': item.inventory.shipment.batch_number if item.inventory and item.inventory.shipment else '',
+            'client': sale.client.name if sale.client else '',
+            'employee': sale.employee.name if sale.employee else '',
+            'area': sale.client.area.name if sale.client and sale.client.area else '',
+            'url': reverse('panel:sale_detail', args=[sale.pk]),
+            'ref': f"#{sale.pk}",
+        })
+
+    for r in returns:
+        sale = r.sale
+        movements.append({
+            'date': r.created_at,
+            'direction': 'in',
+            'type': 'إرجاع',
+            'quantity': r.quantity,
+            'batch': r.sale_item.inventory.shipment.batch_number if r.sale_item.inventory and r.sale_item.inventory.shipment else '',
+            'client': sale.client.name if sale.client else '',
+            'employee': sale.employee.name if sale.employee else '',
+            'area': sale.client.area.name if sale.client and sale.client.area else '',
+            'url': reverse('panel:sale_detail', args=[sale.pk]),
+            'ref': f"#{sale.pk}",
+        })
+
+    if not party_filter_active:
+        for s in shipments:
+            movements.append({
+                'date': s.received_at,
+                'direction': 'in',
+                'type': 'شراء',
+                'quantity': s.quantity,
+                'batch': s.batch_number,
+                'client': s.supplier.name if s.supplier else '',
+                'employee': '',
+                'area': '',
+                'url': reverse('panel:shipment_edit', args=[s.pk]),
+                'ref': s.batch_number,
+            })
+        for l in lost:
+            movements.append({
+                'date': l.lost_at,
+                'direction': 'out',
+                'type': 'تالف/فاقد',
+                'quantity': l.quantity,
+                'batch': l.inventory.shipment.batch_number if l.inventory and l.inventory.shipment else '',
+                'client': '',
+                'employee': '',
+                'area': '',
+                'url': '',
+                'ref': l.note or '',
+            })
+
+    # --- Apply date-range filter (compare on date part) ---
+    def in_range(m):
+        d = m['date'].date() if hasattr(m['date'], 'date') else m['date']
+        if d_from and d < d_from:
+            return False
+        if d_to and d > d_to:
+            return False
+        return True
+
+    movements = [m for m in movements if in_range(m)]
+    movements.sort(key=lambda m: m['date'], reverse=True)
+
+    total_in = sum(m['quantity'] for m in movements if m['direction'] == 'in')
+    total_out = sum(m['quantity'] for m in movements if m['direction'] == 'out')
+
+    areas = Area.objects.filter(client__sale__items__inventory__product=product).distinct()
+    employees = Employee.objects.filter(sale__items__inventory__product=product).distinct()
+    clients = Client.objects.filter(sale__items__inventory__product=product).distinct().order_by('name')
+
+    # Human-readable labels of the active filters (used in the PDF header).
+    selected_area_name = areas.filter(pk=area_id).values_list('name', flat=True).first() if area_id else None
+    selected_employee_name = employees.filter(pk=employee_id).values_list('name', flat=True).first() if employee_id else None
+    selected_client_name = clients.filter(pk=client_id).values_list('name', flat=True).first() if client_id else None
+
+    context = {
+        'product': product,
+        'movements': movements,
+        'total_in': total_in,
+        'total_out': total_out,
+        'net_change': total_in - total_out,
+        # filter option lists (scoped to this product's activity)
+        'areas': areas,
+        'employees': employees,
+        'clients': clients,
+        # current filter values (echoed back into the form)
+        'date_from': date_from,
+        'date_to': date_to,
+        'selected_area': int(area_id) if area_id else None,
+        'selected_employee': int(employee_id) if employee_id else None,
+        'selected_client': int(client_id) if client_id else None,
+        'selected_area_name': selected_area_name,
+        'selected_employee_name': selected_employee_name,
+        'selected_client_name': selected_client_name,
+        "active_sidebar": "products",
+    }
+    return context
+
+
+def product_stock_movement(request, pk):
+    """On-screen, filterable stock-movement page for a single product."""
+    from .models import Product
+    product = get_object_or_404(Product, pk=pk)
+    context = _build_stock_movement_context(request, product)
+    return render(request, 'products/stock_movement.html', context)
+
+
+@require_GET
+def product_stock_movement_pdf(request, pk):
+    """Export the (filtered) stock movement for a product as a PDF."""
+    from .models import Product
+    from django.template.loader import render_to_string
+    from weasyprint import HTML
+    import tempfile
+    from datetime import date
+
+    product = get_object_or_404(Product, pk=pk)
+    context = _build_stock_movement_context(request, product)
+    context['today'] = date.today()
+    context['logo_url'] = request.build_absolute_uri('/static/logo.png')
+
+    html_string = render_to_string('products/stock_movement_pdf.html', context)
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as output:
+        HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf(output.name)
+        output.seek(0)
+        pdf = output.read()
+    return FileResponse(
+        io.BytesIO(pdf),
+        as_attachment=True,
+        filename=f'stock_movement_{product.pk}_{date.today().isoformat()}.pdf'
+    )
+
 
 def client_list(request):
     clients = Client.objects.select_related('area').all()
     search = request.GET.get('search')
     area_id = request.GET.get('area')
     if search:
-        clients = clients.filter(name__icontains=search)
+        # Search across name, phone and address, and match every whitespace-separated
+        # term so "ahmed khartoum" narrows instead of requiring one exact string.
+        for term in search.split():
+            clients = clients.filter(
+                Q(name__icontains=term)
+                | Q(phone__icontains=term)
+                | Q(address__icontains=term)
+            )
     if area_id:
         clients = clients.filter(area_id=area_id)
     # Annotate each client with total sales
-    clients = clients.annotate(total_sales=Sum('sale__total'))
+    clients = clients.annotate(total_sales=Sum('sale__total')).order_by('name')
     paginator = Paginator(clients, 20)
     page_number = request.GET.get('page')
     page_obj = paginator.get_page(page_number)
@@ -302,10 +480,15 @@ def client_list_pdf(request):
     search = request.GET.get('search')
     area_id = request.GET.get('area')
     if search:
-        clients = clients.filter(name__icontains=search)
+        for term in search.split():
+            clients = clients.filter(
+                Q(name__icontains=term)
+                | Q(phone__icontains=term)
+                | Q(address__icontains=term)
+            )
     if area_id:
         clients = clients.filter(area_id=area_id)
-    clients = clients.annotate(total_sales=Sum('sale__total'))
+    clients = clients.annotate(total_sales=Sum('sale__total')).order_by('name')
     logo_url = request.build_absolute_uri('/static/logo.png')
     html_string = render_to_string('panel/client_list_pdf.html', {
         'clients': clients,
@@ -447,6 +630,19 @@ class SaleForm(forms.ModelForm):
         self.fields['client'].widget.attrs.update({'class': 'form-select'})
         self.fields['employee'].widget.attrs.update({'class': 'form-select'})
         self.fields['due_date'].widget.attrs.update({'required': True})
+        # Show the phone (and area) alongside the name so the select2 search box
+        # can match clients by phone number too, not just by name.
+        self.fields['client'].queryset = Client.objects.select_related('area').all()
+
+        def client_label(obj):
+            parts = [obj.name]
+            if obj.phone:
+                parts.append(obj.phone)
+            if obj.area:
+                parts.append(obj.area.name)
+            return " - ".join(parts)
+
+        self.fields['client'].label_from_instance = client_label
         # Set min attribute to today for due_date field
         today_str = date.today().isoformat()
         self.fields['due_date'].widget.attrs['min'] = today_str
@@ -480,8 +676,8 @@ def sale_create(request):
                     inventory = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
                     shipment = inventory.shipment
                     product = inventory.product
-                    if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-                        base_price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                    if shipment:
+                        base_price = float(shipment.sale_price_sdg or 0)
                         # --- FIX: Use correct discount formula and ensure string ---
                         if price_discount and float(price_discount) > 0:
                             price = base_price * (1 - float(price_discount) / 100)
@@ -537,11 +733,11 @@ def sale_create(request):
                         "active_sidebar": "sales"
                     })
                 form.instance.inventory = inventory
-                # Set price from shipment.sale_usd * product.exchange_rate (enforce backend)
+                # Set price from the shipment's SDG sale price (enforce backend)
                 shipment = inventory.shipment
                 product = inventory.product
-                if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-                    form.instance.price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                if shipment:
+                    form.instance.price = float(shipment.sale_price_sdg or 0)
                 else:
                     form.instance.price = 0
                 # --- Set discounts from form data ---
@@ -1122,15 +1318,16 @@ class ShipmentForm(forms.ModelForm):
 
     class Meta:
         model = Shipment
-        fields = ['product', 'quantity', 'cost_usd',"exchange_rate", "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
+        fields = ['product', 'quantity', 'cost_usd',"exchange_rate", "sale_sdg", "sale_usd", "shipment_cost", "batch_number", "expiry_date", "supplier"]
         labels = {
             'product': 'المنتج',
             'quantity': 'الكمية',
             'shipment_cost': 'تكاليف الشحن الاضافية بالجنيه (ترحيل, جمارك, تحميل و غيرها)',
-            'batch_number': 'رقم التشغيلة',                 
+            'batch_number': 'رقم التشغيلة',
             'cost_usd': 'تكلفة الوحدة بالدولار',
             "exchange_rate": "سعر الصرف للدولار ",
-            "sale_usd": "سعر البيع بالدولار",
+            "sale_sdg": "سعر البيع بالجنيه (SDG)",
+            "sale_usd": "سعر البيع بالدولار (يُحسب تلقائياً)",
             'expiry_date': 'تاريخ الانتهاء',
             'supplier': 'المورد',
 
@@ -1145,6 +1342,12 @@ class ShipmentForm(forms.ModelForm):
         self.fields['expiry_date'].widget.attrs.update({'class': 'form-control'})
         self.fields['cost_usd'].widget.attrs.update({'class': 'form-control', 'step': '0.01', 'min': 0})
         self.fields['exchange_rate'].widget.attrs.update({'class': 'form-control', 'step': '0.01', 'min': 1})
+        # SDG sale price is the primary, user-entered selling price.
+        self.fields['sale_sdg'].required = True
+        self.fields['sale_sdg'].widget.attrs.update({'class': 'form-control', 'step': '1', 'min': 0, 'id': 'id_sale_sdg'})
+        # USD sale price is derived from the SDG price; shown read-only for reference.
+        self.fields['sale_usd'].required = False
+        self.fields['sale_usd'].widget.attrs.update({'class': 'form-control bg-light', 'step': '0.0001', 'min': 0, 'id': 'id_sale_usd', 'readonly': True})
         self.fields['supplier'].queryset = Supplier.objects.all()
         # Only disable product field if editing (instance with pk)
         if self.instance and getattr(self.instance, 'pk', None):
@@ -1166,6 +1369,9 @@ def shipment_create(request):
             shipment = form.save(commit=False)
             shipment.received_at = timezone.now()
             shipment.cost_sdg = float(shipment.cost_usd) * float(shipment.exchange_rate)
+            # Derive USD sale price from the clean SDG price the user entered.
+            if shipment.sale_sdg is not None and shipment.exchange_rate:
+                shipment.sale_usd = round(float(shipment.sale_sdg) / float(shipment.exchange_rate), 4)
             shipment.save()
             # Create Inventory for this shipment
             from .models import Inventory
@@ -1243,6 +1449,9 @@ def shipment_edit(request, pk):
                 )
             # update cost_sdg
             new_shipment.cost_sdg = float(new_shipment.cost_usd) * float(new_shipment.exchange_rate)
+            # Derive USD sale price from the clean SDG price the user entered.
+            if new_shipment.sale_sdg is not None and new_shipment.exchange_rate:
+                new_shipment.sale_usd = round(float(new_shipment.sale_sdg) / float(new_shipment.exchange_rate), 4)
             new_shipment.save()
             messages.success(request, "تم تعديل الشحنة بنجاح.")
             return redirect('panel:shipment_list')
@@ -1254,6 +1463,8 @@ def shipment_edit(request, pk):
             'cost_usd': shipment.cost_usd,
             'product': shipment.product.pk if shipment.product else None,
             'supplier': shipment.supplier.pk if shipment.supplier else None,
+            # Pre-fill the effective SDG sale price for legacy shipments.
+            'sale_sdg': shipment.sale_price_sdg,
         }
         form = ShipmentForm(instance=shipment, initial=initial)
     return render(request, 'shipments/shipment_form.html', {
@@ -1461,9 +1672,11 @@ def employee_detail(request, pk):
         })
     # print(sales_with_commission)
     unpaid_commission = employee.get_unpaid_commission(month=month, year=year)
-    # Commission payments for this employee (for this month only)
+    # Commission payments recorded against this commission period. Legacy payments
+    # (created before period tracking) fall back to their actual paid_at date.
     commission_payments = employee.commission_payments.filter(
-        paid_at__year=year, paid_at__month=month
+        Q(period_month=month, period_year=year)
+        | Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month)
     ).order_by('-paid_at')
     # Prepare months for dropdown
     months = []
@@ -2098,26 +2311,38 @@ from django.views.decorators.http import require_POST
 @require_POST
 def commission_pay(request, employee_id):
     from decimal import Decimal
+    from datetime import date
     employee = get_object_or_404(Employee, pk=employee_id)
     amount = request.POST.get('amount')
     note = request.POST.get('note', '')
+    # Commission period this payment is recorded against (defaults to current month).
+    today = date.today()
+    try:
+        period_month = int(request.POST.get('period_month') or today.month)
+        period_year = int(request.POST.get('period_year') or today.year)
+    except (TypeError, ValueError):
+        period_month, period_year = today.month, today.year
+    redirect_url = f"{reverse('panel:employee_detail', args=[employee.pk])}?month={period_month}&year={period_year}"
     try:
         amount = Decimal(amount)
     except Exception:
         messages.error(request, "المبلغ غير صالح.")
-        return redirect('panel:employee_detail', pk=employee.pk)
+        return redirect(redirect_url)
     unpaid = employee.get_unpaid_commission()
     if amount <= 0 or amount > unpaid:
         messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
-        return redirect('panel:employee_detail', pk=employee.pk)
+        return redirect(redirect_url)
     balance = calculate_company_balance(Currency.objects.get(code='SDG'))
     if balance < amount:
         messages.error(request, f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية العمولة ({amount}).")
-        return redirect('panel:employee_detail', pk=employee.pk)
+        return redirect(redirect_url)
     from .models import CommissionPayment
-    CommissionPayment.objects.create(employee=employee, amount=amount, note=note)
+    CommissionPayment.objects.create(
+        employee=employee, amount=amount, note=note,
+        period_month=period_month, period_year=period_year,
+    )
     messages.success(request, f"تم تسجيل دفعة عمولة بمبلغ {amount} بنجاح.")
-    return redirect('panel:employee_detail', pk=employee.pk)
+    return redirect(redirect_url)
 
 def client_detail(request, pk):
     client = get_object_or_404(Client, pk=pk)
@@ -2536,7 +2761,10 @@ def manager_list(request):
         commission_percentage = manager.commission_percentage or Decimal('0')
         commission_amount = total_sales * (commission_percentage / Decimal('100'))
         commission_payments = ManagerCommissionPayment.objects.filter(
-            manager=manager, paid_at__year=year, paid_at__month=month
+            Q(manager=manager) & (
+                Q(period_month=month, period_year=year)
+                | Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month)
+            )
         )
         paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
         unpaid_commission = commission_amount - paid_total
@@ -2637,7 +2865,10 @@ def manager_detail(request, pk):
     # Manager commission payments for this month
     from .models import ManagerCommissionPayment
     commission_payments = ManagerCommissionPayment.objects.filter(
-        manager=manager, paid_at__year=year, paid_at__month=month
+        Q(manager=manager) & (
+            Q(period_month=month, period_year=year)
+            | Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month)
+        )
     ).order_by('-paid_at')
     paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
     unpaid_commission -= paid_total
@@ -2674,40 +2905,44 @@ from django.views.decorators.http import require_POST
 @require_POST
 def manager_commission_pay(request, manager_id):
     from decimal import Decimal
+    from datetime import date
     from .models import Manager, ManagerCommissionPayment
     manager = get_object_or_404(Manager, pk=manager_id)
     amount = request.POST.get('amount')
     note = request.POST.get('note', '')
+    # Commission period this payment is recorded against (from the form, not "now").
+    today = date.today()
+    try:
+        month = int(request.POST.get('period_month') or request.GET.get('month') or today.month)
+        year = int(request.POST.get('period_year') or request.GET.get('year') or today.year)
+    except (TypeError, ValueError):
+        month, year = today.month, today.year
+    redirect_url = f"{reverse('panel:manager_detail', args=[manager.pk])}?month={month}&year={year}"
     try:
         amount = Decimal(amount)
     except Exception:
         messages.error(request, "المبلغ غير صالح.")
-        return redirect('panel:manager_detail', pk=manager.pk)
-    # Calculate unpaid commission for current month/year
-    from datetime import date
-    today = date.today()
-    month = int(request.GET.get('month', today.month))
-    year = int(request.GET.get('year', today.year))
-    # Get total sales for manager's employees
+        return redirect(redirect_url)
+    # Get total sales for manager's employees in the selected period
     employees = manager.employees.all()
     sales = Sale.objects.filter(employee__in=employees, created_at__year=year, created_at__month=month)
     total_sales = sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
     commission_percentage = manager.commission_percentage or Decimal('0')
     commission_amount = total_sales * (commission_percentage / Decimal('100'))
     commission_payments = ManagerCommissionPayment.objects.filter(
-        manager=manager, paid_at__year=year, paid_at__month=month
+        Q(manager=manager) & (
+            Q(period_month=month, period_year=year)
+            | Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month)
+        )
     )
     paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
     unpaid_commission = commission_amount - paid_total
     if amount <= 0 or amount > unpaid_commission:
         messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
-        return redirect('panel:manager_detail', pk=manager.pk)
-    # Optionally, check company SDG balance if needed
-    # from finance.models import Currency, calculate_company_balance
-    # balance = calculate_company_balance(Currency.objects.get(code='SDG'))
-    # if balance < amount:
-    #     messages.error(request, f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية العمولة ({amount}).")
-    #     return redirect('panel:manager_detail', pk=manager.pk)
-    ManagerCommissionPayment.objects.create(manager=manager, amount=amount, note=note)
+        return redirect(redirect_url)
+    ManagerCommissionPayment.objects.create(
+        manager=manager, amount=amount, note=note,
+        period_month=month, period_year=year,
+    )
     messages.success(request, f"تم تسجيل دفعة عمولة للمدير بمبلغ {amount} بنجاح.")
-    return redirect('panel:manager_detail', pk=manager.pk)
+    return redirect(redirect_url)

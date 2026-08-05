@@ -122,24 +122,47 @@
             </table>
           </div>
           {% endif %}
-          {% if payment_form and not pdf_mode and invoice.status != 'paid' %}
-          <div class="mt-4">
-            <h6>إضافة دفعة جديدة</h6>
+          {% if not pdf_mode and invoice.status != 'paid' %}
+          <div class="mt-4 p-3 border rounded bg-light">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0">تسجيل دفعة</h6>
+              <span class="small text-muted">المتبقي: <strong class="text-danger">{{ invoice.remaining_amount|floatformat:"2"|intcomma }} SDG</strong></span>
+            </div>
             <form method="post" action="{% url 'panel:invoice_add_payment' invoice.pk %}">
               {% csrf_token %}
               <div class="row g-2 align-items-end">
                 <div class="col-md-4">
-                  {{ payment_form.amount.label_tag }} {{ payment_form.amount }}
+                  <label class="form-label small mb-1">المبلغ</label>
+                  <input type="number" name="amount" id="payment-amount" class="form-control" min="1"
+                    max="{{ invoice.remaining_amount }}" step="0.01" required placeholder="المبلغ"
+                    value="{{ invoice.remaining_amount|floatformat:'2' }}">
                 </div>
                 <div class="col-md-5">
-                  {{ payment_form.note.label_tag }} {{ payment_form.note }}
+                  <label class="form-label small mb-1">ملاحظة (اختياري)</label>
+                  <input type="text" name="note" class="form-control" placeholder="ملاحظة">
                 </div>
-                <div class="col-md-3">
-                  <button type="submit" class="btn btn-primary">إضافة دفعة</button>
+                <div class="col-md-3 d-flex gap-2">
+                  <button type="button" id="fill-full-amount" class="btn btn-outline-success flex-fill">الكامل</button>
+                  <button type="submit" class="btn btn-primary flex-fill">حفظ</button>
                 </div>
               </div>
             </form>
+            <div class="form-text mt-2">
+              أدخل المبلغ واضغط «حفظ». دفع كامل المتبقي يحدّد الفاتورة كمدفوعة تلقائياً.
+            </div>
           </div>
+          <script>
+            (function () {
+              var fillBtn = document.getElementById('fill-full-amount');
+              var amountInput = document.getElementById('payment-amount');
+              if (fillBtn && amountInput) {
+                fillBtn.addEventListener('click', function () {
+                  amountInput.value = "{{ invoice.remaining_amount|floatformat:'2' }}";
+                  amountInput.focus();
+                });
+              }
+            })();
+          </script>
           {% endif %}
           <div class="mt-4 d-flex justify-content-between align-items-center">
             <span>
@@ -157,18 +180,6 @@
               <a href="{% url 'panel:invoice_pdf' invoice.pk %}" class="btn btn-outline-primary" >
                 تحميل PDF
               </a>
-              {% if invoice.status != 'paid' %}
-                <form method="post" action="{% url 'panel:invoice_mark_paid' invoice.pk %}" style="display:inline;">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-success ms-2">تحديد كمدفوعة</button>
-                </form>
-              {% endif %}
-              {% if invoice.status != 'unpaid' %}
-                {% comment %} <form method="post" action="{% url 'panel:invoice_mark_unpaid' invoice.pk %}" style="display:inline;">
-                  {% csrf_token %}
-                  <button type="submit" class="btn btn-danger ms-2">تحديد كغير مدفوعة</button>
-                </form> {% endcomment %}
-              {% endif %}
             </div>
             {% endif %}
           </div>

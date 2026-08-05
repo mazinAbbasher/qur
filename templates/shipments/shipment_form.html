@@ -36,6 +36,10 @@
             {{ form.quantity|as_crispy_field }}
             {{ form.cost_usd|as_crispy_field }}
             {{ form.exchange_rate|as_crispy_field }}
+            {{ form.sale_sdg|as_crispy_field }}
+            <div class="alert alert-info py-2 small mb-3">
+              أدخل سعر البيع بالجنيه مباشرةً للحصول على سعر نظيف. يتم حساب ما يعادله بالدولار تلقائياً للرجوع إليه فقط.
+            </div>
             {{ form.sale_usd|as_crispy_field }}
             {{ form.shipment_cost|as_crispy_field }}
             {{ form.batch_number|as_crispy_field }}
@@ -45,6 +49,26 @@
             </button>
             <a href="{% url 'panel:shipment_list' %}" class="btn btn-secondary">إلغاء</a>
           </form>
+          <script>
+            document.addEventListener('DOMContentLoaded', function () {
+              var rateInput = document.querySelector('[name="exchange_rate"]');
+              var sdgInput = document.getElementById('id_sale_sdg');
+              var usdInput = document.getElementById('id_sale_usd');
+              function syncUsd() {
+                if (!sdgInput || !usdInput) return;
+                var rate = parseFloat(rateInput && rateInput.value);
+                var sdg = parseFloat(sdgInput.value);
+                if (rate > 0 && !isNaN(sdg)) {
+                  usdInput.value = (sdg / rate).toFixed(4);
+                } else {
+                  usdInput.value = '';
+                }
+              }
+              if (sdgInput) sdgInput.addEventListener('input', syncUsd);
+              if (rateInput) rateInput.addEventListener('input', syncUsd);
+              syncUsd();
+            });
+          </script>
         </div>
       </div>
     </div>

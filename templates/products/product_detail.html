@@ -2,129 +2,177 @@
 {% load humanize %}
 {% block content %}
 <div class="container py-4">
-  <div class="row">
-    <div class="col-md-10 mx-auto">
-      <div class="card shadow">
-        <div class="card-header bg-info text-white">
-          <h5 class="mb-0 text-white">تفاصيل المنتج: {{ product.name }}</h5>
-        </div>
-        <div class="card-body">
-          <dl class="row">
-            <dt class="col-sm-3">الوحدة</dt>
-            <dd class="col-sm-9">{{ product.unit }}</dd>
-            <dt class="col-sm-3">سعر الصرف</dt>
-            <dd class="col-sm-9">{{ product.exchange_rate }}</dd>
-            <dt class="col-sm-3">الوصف</dt>
-            <dd class="col-sm-9">{{ product.description }}</dd>
-            <dt class="col-sm-3">المخزون الحالي</dt>
-            <dd class="col-sm-9">{{ current_stock|intcomma }}</dd>
-          </dl>
-          <hr>
-          <h6>العملاء المرتبطون:</h6>
-          <ul>
-            {% for customer in customers %}
-              <li>{{ customer.name }}</li>
-            {% empty %}
-              <li>لا يوجد عملاء.</li>
-            {% endfor %}
-          </ul>
-          <hr>
-          <h6>تاريخ الشراء (الوارد):</h6>
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th>التاريخ</th>
-                <th>الكمية</th>
-                <th>تكلفة الوحدة (دولار)</th>
-                <th>تكلفة الوحدة (جنيه)</th>
-                <th>رقم التشغيلة</th>
-                <th>تاريخ الانتهاء</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for s in shipments %}
-              <tr>
-                <td>{{ s.received_at|date:"Y-m-d" }}</td>
-                <td>{{ s.quantity }}</td>
-                <td>{{ s.cost_usd }}</td>
-                <td>{{ s.cost_sdg }}</td>
-                <td>{{ s.batch_number }}</td>
-                <td>{{ s.expiry_date|date:"Y-m-d" }}</td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="6" class="text-center text-muted">لا يوجد سجل شراء.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <hr>
-          <h6>تاريخ البيع (الصادر):</h6>
-          <table class="table table-sm">
-            <thead>
-              <tr>
-                <th>التاريخ</th>
-                <th>الكمية</th>
-                <th>السعر</th>
-                <th>العميل</th>
-                <th>رقم التشغيلة</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for si in sale_items %}
-              <tr>
-                <td>{{ si.sale.created_at|date:"Y-m-d" }}</td>
-                <td>{{ si.quantity }}</td>
-                <td>{{ si.price }}</td>
-                <td>{{ si.sale.client.name }}</td>
-                <td>{{ si.inventory.shipment.batch_number }}</td>
-              </tr>
-              {% empty %}
-              <tr><td colspan="5" class="text-center text-muted">لا يوجد سجل بيع.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <hr>
-          <h6>الأسعار عبر الزمن:</h6>
-          <div class="row">
-            <div class="col-md-6">
-              <strong>أسعار الشراء:</strong>
-              <ul>
-                {% for p in purchase_prices %}
-                  <li>{{ p.date|date:"Y-m-d" }}: {{ p.cost_usd }}$ ({{ p.cost_sdg }} SDG) [تشغيلة {{ p.batch }}]</li>
-                {% empty %}
-                  <li>لا يوجد.</li>
-                {% endfor %}
-              </ul>
-            </div>
-            <div class="col-md-6">
-              <strong>أسعار البيع:</strong>
-              <ul>
-                {% for s in sale_prices %}
-                  <li>{{ s.date|date:"Y-m-d" }}: {{ s.price }} SDG ({{ s.quantity }} وحدة) للعميل {{ s.client }} [تشغيلة {{ s.batch }}]</li>
-                {% empty %}
-                  <li>لا يوجد.</li>
-                {% endfor %}
-              </ul>
-            </div>
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+    <div>
+      <h4 class="mb-1 fw-bold">{{ product.name }}</h4>
+      <span class="text-muted">{{ product.description|default:"لا يوجد وصف" }}</span>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{% url 'panel:product_stock_movement' product.pk %}" class="btn bg-gradient-info text-white">
+        <i class="bi bi-arrow-left-right"></i> حركة المخزون
+      </a>
+      <a href="{% url 'panel:product_edit' product.pk %}" class="btn btn-outline-primary">
+        <i class="bi bi-pencil"></i> تعديل
+      </a>
+    </div>
+  </div>
+
+  <!-- Summary cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">المخزون الحالي</div>
+          <div class="h4 mb-0 fw-bold {% if current_stock <= 0 %}text-danger{% else %}text-success{% endif %}">
+            {{ current_stock|intcomma }}
           </div>
-          <hr>
-          <h6>حركة المخزون (الخط الزمني):</h6>
-          <ul>
-            {% for event in timeline %}
-              <li>
-                {% if event.type == 'in' %}
-                  <span class="badge bg-success">وارد</span>
-                {% else %}
-                  <span class="badge bg-danger">صادر</span>
-                {% endif %}
-                {{ event.date|date:"Y-m-d H:i" }}: {{ event.note }}
-              </li>
-            {% empty %}
-              <li>لا يوجد حركة مخزون.</li>
-            {% endfor %}
-          </ul>
         </div>
       </div>
     </div>
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">إجمالي المُشترى</div>
+          <div class="h4 mb-0 fw-bold">{{ total_purchased|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">إجمالي المُباع</div>
+          <div class="h4 mb-0 fw-bold">{{ total_sold|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">آخر سعر بيع (SDG)</div>
+          <div class="h4 mb-0 fw-bold text-primary">{{ latest_sale_price|floatformat:0|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <!-- Product info -->
+    <div class="col-md-5">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-gradient-info text-white">
+          <h6 class="mb-0 text-white">بيانات المنتج</h6>
+        </div>
+        <div class="card-body">
+          <dl class="row mb-0">
+            <dt class="col-5 text-muted">الوحدة</dt>
+            <dd class="col-7">{{ product.unit|default:"-" }}</dd>
+            <dt class="col-5 text-muted">سعر الصرف</dt>
+            <dd class="col-7">{{ product.exchange_rate|default:"-"|intcomma }}</dd>
+            <dt class="col-5 text-muted">آخر تكلفة (SDG)</dt>
+            <dd class="col-7">{{ latest_cost_sdg|floatformat:0|intcomma }}</dd>
+            <dt class="col-5 text-muted">الوصف</dt>
+            <dd class="col-7">{{ product.description|default:"-" }}</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <!-- Batches in stock -->
+    <div class="col-md-7">
+      <div class="card shadow-sm h-100">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+          <h6 class="mb-0">الدفعات المتوفرة في المخزون</h6>
+          <span class="badge bg-secondary">{{ inventories|length }}</span>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>التشغيلة</th>
+                  <th>الكمية</th>
+                  <th>تاريخ الانتهاء</th>
+                  <th>سعر البيع (SDG)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for inv in inventories %}
+                <tr>
+                  <td>{{ inv.shipment.batch_number }}</td>
+                  <td>{{ inv.quantity|intcomma }}</td>
+                  <td>{{ inv.shipment.expiry_date|date:"Y-m-d" }}</td>
+                  <td>{{ inv.shipment.sale_price_sdg|floatformat:0|intcomma }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center text-muted py-3">لا توجد دفعات في المخزون.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Purchase history -->
+  <div class="card shadow-sm mt-4">
+    <div class="card-header bg-light">
+      <h6 class="mb-0">تاريخ الشراء (الوارد)</h6>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>التاريخ</th>
+              <th>الكمية</th>
+              <th>تكلفة الوحدة ($)</th>
+              <th>تكلفة الوحدة (SDG)</th>
+              <th>التشغيلة</th>
+              <th>تاريخ الانتهاء</th>
+              <th>المورد</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in shipments %}
+            <tr>
+              <td>{{ s.received_at|date:"Y-m-d" }}</td>
+              <td>{{ s.quantity|intcomma }}</td>
+              <td>{{ s.cost_usd }}</td>
+              <td>{{ s.cost_sdg|floatformat:0|intcomma }}</td>
+              <td>{{ s.batch_number }}</td>
+              <td>{{ s.expiry_date|date:"Y-m-d" }}</td>
+              <td>{{ s.supplier.name|default:"-" }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="7" class="text-center text-muted py-3">لا يوجد سجل شراء.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Related customers -->
+  <div class="card shadow-sm mt-4">
+    <div class="card-header bg-light">
+      <h6 class="mb-0">العملاء المرتبطون</h6>
+    </div>
+    <div class="card-body">
+      {% for customer in customers %}
+        <a href="{% url 'panel:client_detail' customer.id %}" class="badge bg-light text-dark border me-1 mb-1 text-decoration-none p-2">
+          <i class="bi bi-person"></i> {{ customer.name }}
+        </a>
+      {% empty %}
+        <span class="text-muted">لا يوجد عملاء.</span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="mt-4">
+    <a href="{% url 'panel:product_list' %}" class="btn btn-secondary"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
   </div>
 </div>
 {% endblock %}

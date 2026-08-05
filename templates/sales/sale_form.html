@@ -212,7 +212,12 @@
       $('#id_client').select2({
         dir: "rtl",
         width: '100%',
-        placeholder: 'اختر العميل...'
+        placeholder: 'ابحث بالاسم أو رقم الهاتف...',
+        allowClear: true,
+        language: {
+          noResults: function () { return 'لا يوجد عميل مطابق'; },
+          searching: function () { return 'جاري البحث...'; }
+        }
       });
     }
   // Enable Bootstrap tooltips
@@ -368,18 +373,11 @@
     return {prodId: null, batch: null};
   }
 
-  // Helper: get shipment.sale_usd for each inventory (batch) by matching product and batch_number
-  // Use mapping from Django context: batch_shipment_saleusd
-  const batchShipmentSaleUSD = {
+  // Helper: effective SDG sale price for each inventory (batch).
+  // Prefer the explicit shipment.sale_sdg; fall back to sale_usd * product.exchange_rate.
+  const batchShipmentSaleSDG = {
     {% for inv in inventories %}
-      "{{ inv.pk }}": {{ inv.shipment.sale_usd|default:0 }}{% if not forloop.last %},{% endif %}
-    {% endfor %}
-  };
-
-  // Helper: get product exchange_rate for each product
-  const productExchangeRates = {
-    {% for product in products_with_batches %}
-      "{{ product.pk }}": {{ product.exchange_rate|default:0 }},
+      "{{ inv.pk }}": {{ inv.shipment.sale_price_sdg|default:0 }}{% if not forloop.last %},{% endif %}
     {% endfor %}
   };
 
@@ -387,8 +385,8 @@
   function updatePrice(row, productId, batchId) {
     const priceInput = row.querySelector('input[name$="price"]');
     let price = 0;
-    if (productId && batchId && batchShipmentSaleUSD[batchId] !== undefined && productExchangeRates[productId] !== undefined) {
-      price = parseFloat(batchShipmentSaleUSD[batchId]) * parseFloat(productExchangeRates[productId]);
+    if (batchId && batchShipmentSaleSDG[batchId] !== undefined) {
+      price = parseFloat(batchShipmentSaleSDG[batchId]);
     }
     if (priceInput) {
       priceInput.value = price.toFixed(2);

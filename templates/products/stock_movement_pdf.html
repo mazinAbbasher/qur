@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <title>حركة المخزون - {{ product.name }}</title>
+    <style>
+        body { font-family: 'Cairo', 'Amiri', Arial, sans-serif; color: #222; background: #fff; margin: 0; padding: 0; }
+        .container { max-width: 780px; margin: 24px auto; padding: 0 0 24px 0; }
+        .my-header { padding: 8px 24px 16px 24px; border-bottom: 2px solid #17a2b8; display: flex; align-items: flex-start; justify-content: space-between; }
+        .company-logo { height: 64px; width: auto; object-fit: contain; }
+        .title-block { text-align: left; }
+        .title { font-size: 1.3em; font-weight: bold; margin: 0 0 2px 0; color: #17a2b8; }
+        .subtitle { font-size: 1em; color: #444; margin: 0; }
+        .date { font-size: 0.9em; color: #666; }
+        .filters { margin: 14px 24px; font-size: 0.9em; color: #333; }
+        .filters span { display: inline-block; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 4px; padding: 2px 8px; margin: 2px; }
+        .totals { display: flex; gap: 12px; margin: 14px 24px; }
+        .totals .box { flex: 1; border: 1px solid #ddd; border-radius: 6px; padding: 10px; text-align: center; }
+        .totals .label { font-size: 0.85em; color: #666; }
+        .totals .value { font-size: 1.2em; font-weight: bold; }
+        .in { color: #28a745; }
+        .out { color: #dc3545; }
+        .table-container { margin: 0 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 6px 6px; text-align: right; border-bottom: 1px solid #eee; font-size: 0.88em; }
+        th { background: #f8f9fa; font-weight: bold; border-bottom: 2px solid #bbb; }
+        .badge { padding: 1px 6px; border-radius: 4px; font-size: 0.82em; color: #fff; }
+        .badge-in { background: #28a745; }
+        .badge-out { background: #dc3545; }
+        .footer { margin-top: 28px; font-size: 0.85em; color: #888; text-align: center; padding-top: 12px; border-top: 1px solid #bbb; }
+        @page { size: A4; margin: 24px 18px 24px 18px; @bottom-center { content: "صفحة " counter(page) " / " counter(pages); font-size: 0.8em; color: #888; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="my-header">
+            {% if logo_url %}<img src="{{ logo_url }}" class="company-logo" alt="Logo">{% endif %}
+            <div class="title-block">
+                <div class="title">حركة المخزون</div>
+                <div class="subtitle">{{ product.name }}</div>
+                <div class="date">التاريخ: {{ today|date:"Y-m-d" }}</div>
+            </div>
+        </div>
+
+        {% if date_from or date_to or selected_area_name or selected_employee_name or selected_client_name %}
+        <div class="filters">
+            <strong>التصفية:</strong>
+            {% if date_from %}<span>من: {{ date_from }}</span>{% endif %}
+            {% if date_to %}<span>إلى: {{ date_to }}</span>{% endif %}
+            {% if selected_area_name %}<span>المنطقة: {{ selected_area_name }}</span>{% endif %}
+            {% if selected_employee_name %}<span>المندوب: {{ selected_employee_name }}</span>{% endif %}
+            {% if selected_client_name %}<span>العميل: {{ selected_client_name }}</span>{% endif %}
+        </div>
+        {% endif %}
+
+        <div class="totals">
+            <div class="box"><div class="label">إجمالي الوارد</div><div class="value in">+{{ total_in }}</div></div>
+            <div class="box"><div class="label">إجمالي الصادر</div><div class="value out">-{{ total_out }}</div></div>
+            <div class="box"><div class="label">صافي الحركة</div><div class="value">{{ net_change }}</div></div>
+        </div>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>التاريخ</th>
+                        <th>النوع</th>
+                        <th>الكمية</th>
+                        <th>التشغيلة</th>
+                        <th>العميل / المورد</th>
+                        <th>المندوب</th>
+                        <th>المنطقة</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in movements %}
+                    <tr>
+                        <td>{{ m.date|date:"Y-m-d H:i" }}</td>
+                        <td>
+                            {% if m.direction == 'in' %}
+                                <span class="badge badge-in">وارد · {{ m.type }}</span>
+                            {% else %}
+                                <span class="badge badge-out">صادر · {{ m.type }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="{% if m.direction == 'in' %}in{% else %}out{% endif %}">
+                            {% if m.direction == 'in' %}+{% else %}-{% endif %}{{ m.quantity }}
+                        </td>
+                        <td>{{ m.batch|default:"-" }}</td>
+                        <td>{{ m.client|default:"-" }}</td>
+                        <td>{{ m.employee|default:"-" }}</td>
+                        <td>{{ m.area|default:"-" }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="7" style="text-align:center;color:#bbb;">لا توجد حركات.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="footer">
+            Equatorial medical Ltd &mdash; جميع الحقوق محفوظة &copy; {{ today|date:"Y" }}<br>
+            تم توليد هذا التقرير تلقائياً بواسطة النظام
+        </div>
+    </div>
+</body>
+</html>

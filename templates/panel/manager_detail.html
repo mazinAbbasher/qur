@@ -49,11 +49,13 @@
             <h6 class="font-bold mt-6 mb-2 text-gray-700">دفع عمولة للمدير:</h6>
             <form method="post" action="{% url 'panel:manager_commission_pay' manager.pk %}" class="flex flex-wrap gap-2 items-center">
               {% csrf_token %}
+              <input type="hidden" name="period_month" value="{{ month }}">
+              <input type="hidden" name="period_year" value="{{ year }}">
               <input type="number" name="amount" step="0.01" min="1" max="{{ unpaid_commission }}" class="form-control w-32" placeholder="المبلغ" required>
               <input type="text" name="note" class="form-control w-64" placeholder="ملاحظة (اختياري)">
               <button type="submit" class="btn btn-success">تسجيل دفعة عمولة</button>
             </form>
-            <div class="mt-2 text-muted text-xs">يمكنك دفع جزء أو كل العمولة غير المدفوعة للمدير.</div>
+            <div class="mt-2 text-muted text-xs">سيتم تسجيل الدفعة ضمن فترة العمولة المختارة: <strong>{{ year }}-{{ month }}</strong>. يمكنك دفع جزء أو كل العمولة غير المدفوعة للمدير.</div>
           </div>
           <div class="mb-6">
             <h6 class="font-bold mt-6 mb-2 text-gray-700">سجل دفعات العمولات للمدير:</h6>

@@ -26,20 +26,27 @@
               {% endfor %}
             </ul>
           {% endif %}
-          <form method="get" class="row mb-3">
-            <div class="col-md-4">
-              <input type="text" name="search" class="form-control" placeholder="بحث بالاسم..." value="{{ search|default:'' }}">
+          <form method="get" class="row g-2 mb-3 align-items-center" id="client-search-form">
+            <div class="col-md-5">
+              <div class="input-group">
+                <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                <input type="text" name="search" id="client-search-input" class="form-control"
+                  placeholder="بحث بالاسم أو الهاتف أو العنوان..." value="{{ search|default:'' }}" autofocus>
+                {% if search %}
+                  <a href="{% url 'panel:client_list' %}{% if selected_area %}?area={{ selected_area }}{% endif %}" class="btn btn-outline-secondary" title="مسح البحث"><i class="bi bi-x-lg"></i></a>
+                {% endif %}
+              </div>
             </div>
             <div class="col-md-4">
-              <select name="area" class="form-control">
+              <select name="area" class="form-control" onchange="this.form.submit()">
                 <option value="">كل المناطق</option>
                 {% for area in areas %}
                   <option value="{{ area.id }}" {% if selected_area == area.id %}selected{% endif %}>{{ area.name }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div class="col-md-2">
-              <button type="submit" class="btn btn-primary">بحث</button>
+            <div class="col-md-3">
+              <button type="submit" class="btn btn-primary w-100"><i class="bi bi-search"></i> بحث</button>
             </div>
           </form>
           <div class="table-responsive">

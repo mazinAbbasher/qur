@@ -161,7 +161,11 @@ class Shipment(models.Model):
     received_at = models.DateTimeField(default=timezone.now)
     cost_usd = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     cost_sdg = models.DecimalField(max_digits=12, decimal_places=2, null=True)
-    sale_usd = models.DecimalField(max_digits=10, decimal_places=2, null=True)
+    # 4 decimals so the USD value derived from a clean SDG price stores precisely.
+    sale_usd = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    # Sale price in SDG. This is the source of truth for the selling price so the
+    # user can set a clean SDG amount without being limited by USD's 2 decimals.
+    sale_sdg = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     batch_number = models.CharField(max_length=100)  # <-- moved here
     expiry_date = models.DateField() 
     exchange_rate = models.IntegerField(null=True)
@@ -178,6 +182,19 @@ class Shipment(models.Model):
     def get_absolute_url(self):
         from django.urls import reverse
         return reverse('panel:shipment_edit', args=[self.pk])
+
+    @property
+    def sale_price_sdg(self):
+        """Effective unit selling price in SDG.
+
+        Prefers the explicit ``sale_sdg`` so a clean SDG price is preserved
+        exactly; falls back to the legacy ``sale_usd * product.exchange_rate``
+        for older shipments that predate the ``sale_sdg`` field.
+        """
+        if self.sale_sdg is not None:
+            return self.sale_sdg
+        rate = getattr(self.product, 'exchange_rate', None) or 0
+        return Decimal(str(self.sale_usd or 0)) * Decimal(str(rate))
 
     def __str__(self):
         return f"Shipment of {self.product.name} ({self.quantity})"
@@ -433,6 +450,11 @@ class CommissionPayment(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
     note = models.CharField(max_length=255, blank=True, null=True)
+    # The commission period (month/year) this payment is recorded against.
+    # Kept separate from ``paid_at`` so a payment for a past month is reported
+    # against that month regardless of when it was actually entered.
+    period_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    period_year = models.PositiveSmallIntegerField(null=True, blank=True)
     # Optionally, link to commissions paid in this payment (for audit)
     commissions = models.ManyToManyField(Commission, blank=True, related_name='payments')
 
@@ -496,6 +518,9 @@ class ManagerCommissionPayment(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
     note = models.CharField(max_length=255, blank=True, null=True)
+    # The commission period (month/year) this payment is recorded against.
+    period_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    period_year = models.PositiveSmallIntegerField(null=True, blank=True)
 
     def __str__(self):
         return f"Commission Payment {self.amount} to Manager {self.manager.name} at {self.paid_at}"

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+
+  <!-- Header -->
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+    <div>
+      <h4 class="mb-1 fw-bold">حركة المخزون</h4>
+      <span class="text-muted">{{ product.name }}</span>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{% url 'panel:product_stock_movement_pdf' product.pk %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"
+         class="btn bg-gradient-danger text-white">
+        <i class="bi bi-file-earmark-pdf"></i> تحميل PDF
+      </a>
+      <a href="{% url 'panel:product_detail' product.pk %}" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-right"></i> تفاصيل المنتج
+      </a>
+    </div>
+  </div>
+
+  <!-- Summary -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">إجمالي الوارد</div>
+          <div class="h4 mb-0 fw-bold text-success">+{{ total_in|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">إجمالي الصادر</div>
+          <div class="h4 mb-0 fw-bold text-danger">-{{ total_out|intcomma }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12 col-md-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body text-center">
+          <div class="text-muted small mb-1">صافي الحركة</div>
+          <div class="h4 mb-0 fw-bold {% if net_change < 0 %}text-danger{% else %}text-success{% endif %}">
+            {{ net_change|intcomma }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header bg-light">
+      <h6 class="mb-0"><i class="bi bi-funnel"></i> تصفية</h6>
+    </div>
+    <div class="card-body">
+      <form method="get" class="row g-3 align-items-end">
+        <div class="col-md-3 col-6">
+          <label class="form-label small mb-1">من تاريخ</label>
+          <input type="date" name="date_from" value="{{ date_from }}" class="form-control">
+        </div>
+        <div class="col-md-3 col-6">
+          <label class="form-label small mb-1">إلى تاريخ</label>
+          <input type="date" name="date_to" value="{{ date_to }}" class="form-control">
+        </div>
+        <div class="col-md-2 col-6">
+          <label class="form-label small mb-1">المدينة / المنطقة</label>
+          <select name="area" class="form-select">
+            <option value="">الكل</option>
+            {% for area in areas %}
+              <option value="{{ area.id }}" {% if selected_area == area.id %}selected{% endif %}>{{ area.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 col-6">
+          <label class="form-label small mb-1">المندوب</label>
+          <select name="employee" class="form-select">
+            <option value="">الكل</option>
+            {% for emp in employees %}
+              <option value="{{ emp.id }}" {% if selected_employee == emp.id %}selected{% endif %}>{{ emp.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2 col-6">
+          <label class="form-label small mb-1">العميل</label>
+          <select name="client" class="form-select">
+            <option value="">الكل</option>
+            {% for c in clients %}
+              <option value="{{ c.id }}" {% if selected_client == c.id %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-12 d-flex gap-2">
+          <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> تطبيق</button>
+          <a href="{% url 'panel:product_stock_movement' product.pk %}" class="btn btn-outline-secondary">إعادة تعيين</a>
+        </div>
+      </form>
+      {% if selected_area or selected_employee or selected_client %}
+      <div class="alert alert-warning py-2 small mt-3 mb-0">
+        <i class="bi bi-info-circle"></i> عند التصفية حسب العميل/المندوب/المنطقة يتم عرض حركات المبيعات والإرجاع فقط (لا تظهر المشتريات والفاقد لعدم ارتباطها بعميل).
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Movement table -->
+  <div class="card shadow-sm">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+      <h6 class="mb-0">سجل الحركة</h6>
+      <span class="badge bg-secondary">{{ movements|length }} حركة</span>
+    </div>
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>التاريخ</th>
+              <th>النوع</th>
+              <th>الكمية</th>
+              <th>التشغيلة</th>
+              <th>العميل / المورد</th>
+              <th>المندوب</th>
+              <th>المنطقة</th>
+              <th>مرجع</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in movements %}
+            <tr>
+              <td class="text-nowrap">{{ m.date|date:"Y-m-d H:i" }}</td>
+              <td>
+                {% if m.direction == 'in' %}
+                  <span class="badge bg-success">وارد · {{ m.type }}</span>
+                {% else %}
+                  <span class="badge bg-danger">صادر · {{ m.type }}</span>
+                {% endif %}
+              </td>
+              <td class="fw-bold {% if m.direction == 'in' %}text-success{% else %}text-danger{% endif %}">
+                {% if m.direction == 'in' %}+{% else %}-{% endif %}{{ m.quantity|intcomma }}
+              </td>
+              <td>{{ m.batch|default:"-" }}</td>
+              <td>{{ m.client|default:"-" }}</td>
+              <td>{{ m.employee|default:"-" }}</td>
+              <td>{{ m.area|default:"-" }}</td>
+              <td>
+                {% if m.url %}
+                  <a href="{{ m.url }}" class="text-decoration-none">{{ m.ref }}</a>
+                {% else %}
+                  {{ m.ref|default:"-" }}
+                {% endif %}
+              </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-center text-muted py-4">لا توجد حركات مطابقة للتصفية.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
