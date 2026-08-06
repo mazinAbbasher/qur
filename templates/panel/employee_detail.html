@@ -30,11 +30,14 @@
           <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-gray-50 rounded p-4">
               <div class="mb-2"><span class="font-semibold">مبيعات الشهر:</span> {{ total_sales|floatformat:2|intcomma }}</div>
+              {% if is_manager %}
               <div class="mb-2"><span class="font-semibold">الهدف الشهري:</span> {{ sales_target|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold">نسبة العمولة:</span> {{ commission_percentage|floatformat:2 }}%</div>
               <div class="mb-2"><span class="font-semibold">قيمة العمولة:</span> {{ commission_amount|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}</div>
+              {% endif %}
             </div>
+            {% if is_manager %}
             <div class="flex flex-col justify-center">
               <div class="mb-2 font-semibold">نسبة تحقيق الهدف:</div>
               <div class="w-full bg-gray-200 rounded h-8 relative overflow-hidden">
@@ -57,7 +60,9 @@
                 </div>
               </div>
             </div>
+            {% endif %}
           </div>
+          {% if is_manager %}
           <div class="mb-6">
             <h6 class="font-bold mt-6 mb-2 text-gray-700">دفع عمولة:</h6>
             <form method="post" action="{% url 'panel:commission_pay' employee.pk %}" class="flex flex-wrap gap-2 items-center">
@@ -95,6 +100,7 @@
               </tbody>
             </table>
           </div>
+          {% endif %}
           <h6 class="font-bold mt-6 mb-2 text-gray-700">المبيعات لهذا الشهر:</h6>
           <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200 border">
@@ -103,7 +109,7 @@
                   <th class="px-4 py-2 text-right font-bold">رقم البيع</th>
                   <th class="px-4 py-2 text-right font-bold">التاريخ</th>
                   <th class="px-4 py-2 text-right font-bold">القيمة</th>
-                  <th class="px-4 py-2 text-right font-bold">عمولة</th>
+                  {% if is_manager %}<th class="px-4 py-2 text-right font-bold">عمولة</th>{% endif %}
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-100">
@@ -112,7 +118,7 @@
                   <td class="px-4 py-2">{{ row.sale.pk }}</td>
                   <td class="px-4 py-2">{{ row.sale.created_at|date:"Y-m-d" }}</td>
                   <td class="px-4 py-2">{{ row.sale.total|floatformat:2|intcomma }}</td>
-                  <td class="px-4 py-2">{{ row.commission|floatformat:2|intcomma }}</td>
+                  {% if is_manager %}<td class="px-4 py-2">{{ row.commission|floatformat:2|intcomma }}</td>{% endif %}
                 </tr>
                 {% empty %}
                 <tr>

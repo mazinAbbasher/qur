@@ -6,13 +6,11 @@ A single middleware does two jobs:
    (``settings.LOGIN_EXEMPT_PREFIXES``) — e.g. the login page, static files,
    the PWA service worker and the token-authenticated sync API.
 
-2. Enforces the salesperson access policy *default-deny*: a salesperson may
-   only reach the view names listed in
-   ``panel.permissions.SALESPERSON_ALLOWED_VIEWS``; anything else redirects
-   them back to their sales list. Managers and superusers are unrestricted.
-
-Failing closed (deny by default) means a newly added sensitive view is
-automatically off-limits to salespeople until it is explicitly allowed.
+2. Enforces the salesperson access policy: salespeople have broad operational
+   access and are blocked only from the manager-only financial pages listed in
+   ``panel.permissions`` (net profit, profit reports, commissions, expenses and
+   the finance app). A blocked page redirects them back to their sales list.
+   Managers and superusers are unrestricted.
 """
 
 from django.conf import settings
@@ -52,10 +50,10 @@ class AccessControlMiddleware:
         if is_manager(user):
             return None
 
-        # 3) Salespeople: default-deny outside the explicit allowlist.
+        # 3) Salespeople: full access except the manager-only financial pages.
         match = request.resolver_match
         view_name = match.view_name if match else ''
-        if salesperson_can_access(view_name):
+        if salesperson_can_access(view_name, request.path_info):
             return None
 
         # Denied — bounce back to the salesperson's home (their sales list).

@@ -152,11 +152,20 @@ Encrypt certificate. HTTPS is required — tokens travel in request headers.
 * A pre-sync backup of the manager's local SQLite is at `db.sqlite3.bak-presync`.
 
 ## Roles cheat-sheet
-| Capability                         | Manager | Salesperson |
-|------------------------------------|:------:|:-----------:|
-| Create sales / invoices            |   ✓    |      ✓      |
-| Add & edit clients                 |   ✓    |      ✓      |
-| Record payments / returns          |   ✓    |      ✓      |
-| View products / stock / SDG prices |   ✓    |      ✓ (read-only) |
-| Purchase costs, profit, finance    |   ✓    |      ✗      |
-| Shipments, suppliers, commissions  |   ✓    |      ✗      |
+Salespeople now have **broad operational access** — only *financial* data and
+pages stay manager-only.
+
+| Capability                                             | Manager | Salesperson |
+|--------------------------------------------------------|:------:|:-----------:|
+| Sales, invoices, payments, returns                     |   ✓    |      ✓      |
+| Create/edit clients, products, areas, lost products    |   ✓    |      ✓      |
+| **View** shipments, suppliers, employees, managers     |   ✓    |  ✓ (no cost/commission figures) |
+| Create/edit shipments, suppliers, staff                |   ✓    |      ✗      |
+| Purchase costs (USD/SDG), profit, net-profit dashboard |   ✓    |      ✗      |
+| Commissions, expenses, finance (balances/partners)     |   ✓    |      ✗      |
+
+> **Security note — salesperson laptops:** a salesperson laptop should start
+> from an **empty** database and pull from the server, so cost/commission data
+> physically never lands on it (the sync strips those fields). Do **not** copy
+> the manager's full `db.sqlite3` onto a salesperson laptop — hiding a field in
+> the UI is not the same as it being absent from the local database file.

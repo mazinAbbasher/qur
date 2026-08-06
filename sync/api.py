@@ -22,7 +22,7 @@ from django.views.decorators.http import require_POST
 
 from .engine import apply_batch, collect_server_changes
 from .models import Node, SyncLog
-from .registry import specs_for_push
+from .registry import sensitive_fields_for, specs_for_push
 
 
 def _get_token(request, body):
@@ -97,6 +97,14 @@ def api_push(request):
     allowed = {s.label for s in specs_for_push(node.role)}
     accepted = [r for r in changes if r.get('label') in allowed]
     rejected = [r.get('label') for r in changes if r.get('label') not in allowed]
+
+    # Defence in depth: never let a node write fields its role may not hold
+    # (e.g. a tampered client trying to null out purchase costs).
+    for r in accepted:
+        strip = sensitive_fields_for(r.get('label'), node.role)
+        if strip and r.get('fields'):
+            for f in strip:
+                r['fields'].pop(f, None)
 
     # The server is authoritative for stock, so recompute after applying.
     # The whole batch is atomic: on error nothing is applied and the client

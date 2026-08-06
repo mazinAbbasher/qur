@@ -53,7 +53,12 @@ def _post(path, payload):
 
 
 def build_push_payload():
-    """Serialize outbox rows to send. Returns (rows, outbox_entry_pks)."""
+    """Serialize outbox rows to send. Returns (rows, outbox_entry_pks).
+
+    Serialized with THIS node's own role, so a salesperson laptop never even
+    sends fields it isn't allowed to hold (it can't null out server-side costs).
+    """
+    role = 'salesperson' if getattr(settings, 'SYNC_ROLE', '') == 'salesperson' else 'manager'
     rows, pks = [], []
     for entry in SyncOutbox.objects.all().order_by('enqueued_at'):
         model = get_model(entry.model_label)
@@ -64,7 +69,7 @@ def build_push_payload():
                 'is_deleted': True, 'fields': {},
             })
         else:
-            rows.append(serialize_instance(inst, role='manager'))
+            rows.append(serialize_instance(inst, role=role))
         pks.append(entry.pk)
     return rows, pks
 

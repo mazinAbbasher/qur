@@ -67,40 +67,46 @@ def manager_required(view_func):
     return _wrapped
 
 
-# View names (namespaced) a salesperson is explicitly allowed to reach.
-# Everything else under panel/finance is manager-only.
-SALESPERSON_ALLOWED_VIEWS = {
-    # Sales workflow
-    'panel:sale_list',
-    'panel:sale_create',
-    'panel:sale_detail',
-    'panel:sale_edit',
-    'panel:sale_return_product',
-    'panel:sale_list_pdf',
-    # Clients (add & edit)
-    'panel:client_list',
-    'panel:client_add',
-    'panel:client_edit',
-    'panel:client_detail',
-    'panel:client_pdf',
-    'panel:client_list_pdf',
-    # Invoices & payments
-    'panel:invoice_list',
-    'panel:invoice_detail',
-    'panel:invoice_add_payment',
-    'panel:invoice_pdf',
-    # Read-only reference data (no cost fields rendered for salespeople)
-    'panel:product_list',
-    'panel:product_detail',
-    'panel:inventory_list',
-    'panel:area_list',
-    # Areas needed when adding a client
-    'panel:clients_by_area',
-    # Sync: a salesperson may upload their own data / check status
-    'sync:status',
-    'sync:run',
+# Salespeople get broad operational access. Only *purely financial* pages
+# (costs, profit, commissions, expenses and the whole finance app) stay
+# manager-only. This is a blocklist: anything not listed here is allowed, so
+# salespeople can manage sales, clients, products, inventory, shipments,
+# employees, managers, suppliers, areas and lost products — but the cost/profit
+# figures inside those pages are still hidden (templates) and never reach a
+# salesperson's laptop (sync strips them).
+MANAGER_ONLY_VIEWS = {
+    # Financial dashboards / profit reports
+    'panel:index',                       # the net-profit / totals dashboard
+    'panel:net_profit_dashboard',
+    'panel:shipment_profit_report',
+    # Commissions (staff pay)
+    'panel:sale_commissions',
+    'panel:commission_pay',
+    'panel:manager_commission_pay',
+    'panel:get_employee_commission',
+    # Expenses (company spending)
+    'panel:expense_list',
+    'panel:expense_add',
+    'panel:expense_edit',
+    'panel:expense_delete',
+    'panel:expense_list_pdf',
+    # Purchasing & staff/pay records are VIEW-ONLY for reps (they can open the
+    # lists/details, with cost/commission columns hidden, but not create/edit —
+    # those carry financial data and are manager functions).
+    'panel:shipment_create', 'panel:shipment_edit', 'panel:shipment_delete',
+    'panel:employee_add', 'panel:employee_edit', 'panel:employee_delete',
+    'panel:manager_add', 'panel:manager_edit', 'panel:manager_delete',
+    'panel:supplier_add', 'panel:supplier_edit', 'panel:supplier_delete',
+    'panel:supplier_add_payment',
 }
 
+# Whole URL trees that are manager-only (the finance app: balances, partners,
+# currency exchange).
+MANAGER_ONLY_PREFIXES = ('/finance/',)
 
-def salesperson_can_access(view_name):
-    return view_name in SALESPERSON_ALLOWED_VIEWS
+
+def salesperson_can_access(view_name, path=''):
+    """Default-allow: a salesperson may reach anything not explicitly financial."""
+    if any(path.startswith(p) for p in MANAGER_ONLY_PREFIXES):
+        return False
+    return view_name not in MANAGER_ONLY_VIEWS

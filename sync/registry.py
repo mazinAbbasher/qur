@@ -33,17 +33,22 @@ class SyncSpec:
 # Parents-first order. Upserts apply top-to-bottom; deletes apply bottom-to-top.
 _SPECS = [
     # ---- Reference data (server is the authority; laptops pull it) ----------
-    SyncSpec('panel.Area', 'reference', salesperson_readable=True, salesperson_writable=False),
-    SyncSpec('panel.Supplier', 'reference', salesperson_readable=False, salesperson_writable=False),
+    SyncSpec('panel.Area', 'reference', salesperson_readable=True, salesperson_writable=True),
+    # Suppliers, staff and shipments are READ-ONLY for salespeople. They carry
+    # financial meaning a rep can't see (costs/commissions), so letting a rep
+    # push them back would null those figures out on the server. Reps view them;
+    # only managers create/edit them.
+    SyncSpec('panel.Supplier', 'reference', salesperson_readable=True, salesperson_writable=False),
     SyncSpec('panel.Employee', 'reference', salesperson_readable=True, salesperson_writable=False,
              sensitive_fields=('commission_percentage', 'sales_target')),
-    SyncSpec('panel.Manager', 'reference', salesperson_readable=False, salesperson_writable=False),
+    SyncSpec('panel.Manager', 'reference', salesperson_readable=True, salesperson_writable=False,
+             sensitive_fields=('commission_percentage',)),
     SyncSpec('panel.ExchangeRate', 'reference', salesperson_readable=False, salesperson_writable=False),
-    SyncSpec('panel.Product', 'reference', salesperson_readable=True, salesperson_writable=False),
+    SyncSpec('panel.Product', 'reference', salesperson_readable=True, salesperson_writable=True),
     SyncSpec('panel.Shipment', 'reference', salesperson_readable=True, salesperson_writable=False,
              sensitive_fields=('cost_usd', 'cost_sdg', 'shipment_cost', 'supplier')),
     SyncSpec('panel.Inventory', 'reference', salesperson_readable=True, salesperson_writable=False),
-    SyncSpec('panel.LostProduct', 'reference', salesperson_readable=False, salesperson_writable=False),
+    SyncSpec('panel.LostProduct', 'reference', salesperson_readable=True, salesperson_writable=True),
     SyncSpec('panel.Expense', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('panel.Commission', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('panel.CommissionPayment', 'reference', salesperson_readable=False, salesperson_writable=False),

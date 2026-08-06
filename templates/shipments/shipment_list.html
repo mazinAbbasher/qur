@@ -7,7 +7,7 @@
       <div class="card shadow">
         <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
           <h5 class="mb-0 text-white">قائمة المشتروات</h5>
-          <a href="{% url 'panel:shipment_create' %}" class="btn btn-success">إضافة شراء جديد</a>
+          {% if is_manager %}<a href="{% url 'panel:shipment_create' %}" class="btn btn-success">إضافة شراء جديد</a>{% endif %}
         </div>
         <div class="card-body">
           <!-- Download & Share PDF Button -->
@@ -36,12 +36,14 @@
                   <th class="px-4 py-2 text-right font-bold">#</th>
                   <th class="px-4 py-2 text-right font-bold">المنتج</th>
                   <th class="px-4 py-2 text-right font-bold">الكمية</th>
+                  {% if is_manager %}
                   <th class="px-4 py-2 text-right font-bold">تكلفة الوحدة بالجنيه</th>
                   <th class="px-4 py-2 text-right font-bold">تكاليف اضافيه (جنيه)</th>
+                  {% endif %}
                   <th class="px-4 py-2 text-right font-bold">رقم التشغيلة</th>
                   <th class="px-4 py-2 text-right font-bold">تاريخ الانتهاء</th>
                   <th class="px-4 py-2 text-right font-bold">تاريخ الاستلام</th>
-                  <th class="px-4 py-2 text-right font-bold">إجراءات</th>
+                  {% if is_manager %}<th class="px-4 py-2 text-right font-bold">إجراءات</th>{% endif %}
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-100">
@@ -50,6 +52,7 @@
                   <td class="px-4 py-2">{{ shipment.pk }}</td>
                   <td class="px-4 py-2">{{ shipment.product.name }}</td>
                   <td class="px-4 py-2">{{ shipment.quantity }}</td>
+                  {% if is_manager %}
                   <td class="px-4 py-2">
                     {% if shipment.cost_sdg %}
                       {{ shipment.cost_sdg|floatformat:"2"|intcomma }} SDG
@@ -58,9 +61,11 @@
                     {% endif %}
                   </td>
                   <td class="px-4 py-2">{{ shipment.shipment_cost|floatformat:"2"|intcomma }} SDG</td>
+                  {% endif %}
                   <td class="px-4 py-2">{{ shipment.batch_number }}</td>
                   <td class="px-4 py-2">{{ shipment.expiry_date }}</td>
                   <td class="px-4 py-2">{{ shipment.received_at|date:"Y-m-d H:i" }}</td>
+                  {% if is_manager %}
                   <td class="px-4 py-2">
                     <div class="flex flex-row gap-2 justify-center">
                       <a href="{% url 'panel:shipment_edit' shipment.pk %}"
@@ -77,6 +82,7 @@
                       #} {% endcomment %}
                     </div>
                   </td>
+                  {% endif %}
                 </tr>
                 {% empty %}
                 <tr>

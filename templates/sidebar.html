@@ -25,6 +25,7 @@
       </a>
     </li>
 
+    {# ---- Expenses (manager only: company spending) ---- #}
     {% if is_manager %}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'expenses' %}active bg-gradient-info{% endif %}" href="{% url 'panel:expense_list' %}">
@@ -34,6 +35,9 @@
         <span class="nav-link-text ms-1 m-1">المصروفات</span>
       </a>
     </li>
+    {% endif %}
+
+    {# ---- Staff (all roles; pay figures hidden from salespeople) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'employees' %}active bg-gradient-info{% endif %}" href="{% url 'panel:employee_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -50,6 +54,8 @@
         <span class="nav-link-text ms-1 m-1">مدراء المناديب</span>
       </a>
     </li>
+
+    {# ---- Purchases (all roles; costs hidden from salespeople) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'shipments' %}active bg-gradient-info{% endif %}" href="{% url 'panel:shipment_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -58,9 +64,8 @@
         <span class="nav-link-text ms-1 m-1">المشتروات</span>
       </a>
     </li>
-    {% endif %}
 
-    {# ---- Products (all roles; costs hidden from salespeople in the pages) ---- #}
+    {# ---- Products (all roles) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'products' %}active bg-gradient-info{% endif %}" href="{% url 'panel:product_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -80,7 +85,7 @@
       </a>
     </li>
 
-    {% if is_manager %}
+    {# ---- Areas (all roles) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'areas' %}active bg-gradient-info{% endif %}" href="{% url 'panel:area_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -89,6 +94,8 @@
         <span class="nav-link-text ms-1 m-1">المناطق</span>
       </a>
     </li>
+
+    {# ---- Suppliers (all roles; balances/costs hidden from salespeople) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'suppliers' %}active bg-gradient-info{% endif %}" href="{% url 'panel:supplier_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -97,6 +104,8 @@
         <span class="nav-link-text ms-1 m-1">الموردين</span>
       </a>
     </li>
+
+    {# ---- Lost products (all roles) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'lost_products' %}active bg-gradient-info{% endif %}" href="{% url 'panel:lost_product_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -106,7 +115,8 @@
       </a>
     </li>
 
-    {# ---- Finance (manager only) ---- #}
+    {# ---- Finance (manager only: company balances, partners, exchange) ---- #}
+    {% if is_manager %}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'finance_dashboard' %}active bg-gradient-info{% endif %}" href="{% url 'financial_dashboard' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">

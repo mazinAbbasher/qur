@@ -4,7 +4,7 @@
 <div class="container py-4">
   <div class="mb-3">
     <a href="{% url 'panel:supplier_list' %}" class="btn btn-secondary btn-sm"><i class="bi bi-arrow-right"></i> العودة للقائمة</a>
-    <a href="{% url 'panel:supplier_edit' supplier.pk %}" class="btn btn-warning btn-sm">تعديل</a>
+    {% if is_manager %}<a href="{% url 'panel:supplier_edit' supplier.pk %}" class="btn btn-warning btn-sm">تعديل</a>{% endif %}
   </div>
   {% if messages %}
   <ul class="messages">
@@ -25,6 +25,7 @@
         </div>
         <div class="col-md-6">
           <p><strong>ملاحظات:</strong> {{ supplier.note|default:"-" }}</p>
+          {% if is_manager %}
           <p>
             <strong>إجمالي الشحنات:</strong>
             <span class="text-primary">{{ supplier.total_shipments_amount|floatformat:2|intcomma }}  دولار</span>
@@ -39,6 +40,7 @@
               {{ supplier.balance|floatformat:2|intcomma }} دولار
             </span>
           </p>
+          {% endif %}
         </div>
       </div>
       <hr>
@@ -50,7 +52,7 @@
               <th>#</th>
               <th>المنتج</th>
               <th>الكمية</th>
-              <th>تكلفة الوحدة (دولار)</th>
+              {% if is_manager %}<th>تكلفة الوحدة (دولار)</th>{% endif %}
               {% comment %} <th>تكلفة الشحن</th> {% endcomment %}
               <th>تاريخ الاستلام</th>
               <th>رقم التشغيلة</th>
@@ -63,7 +65,7 @@
               <td>{{ forloop.counter }}</td>
               <td>{{ s.product.name }}</td>
               <td>{{ s.quantity }}</td>
-              <td>{{ s.cost_usd|floatformat:2|intcomma }}</td>
+              {% if is_manager %}<td>{{ s.cost_usd|floatformat:2|intcomma }}</td>{% endif %}
               {% comment %} <td>{{ s.shipment_cost|floatformat:2|intcomma }}</td> {% endcomment %}
               <td>{{ s.received_at|date:"Y-m-d" }}</td>
               <td>{{ s.batch_number }}</td>
@@ -77,6 +79,7 @@
           </tbody>
         </table>
       </div>
+      {% if is_manager %}
       <h6>سجل المدفوعات</h6>
       <div class="table-responsive mb-4">
         <table class="table table-bordered table-sm">
@@ -118,6 +121,7 @@
           <button type="submit" class="btn btn-primary">إضافة دفعة</button>
         </div>
       </form>
+      {% endif %}
     </div>
   </div>
 </div>

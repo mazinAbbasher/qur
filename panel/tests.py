@@ -6,13 +6,14 @@ These use an isolated test database; the real db.sqlite3 is never touched.
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from panel.models import Product
 from panel.permissions import MANAGER_GROUP, SALESPERSON_GROUP
 
 
+@override_settings(SYNC_ROLE='server')  # deterministic regardless of local .env
 class AccessControlTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -34,20 +35,31 @@ class AccessControlTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertIn('/accounts/login/', resp['Location'])
 
-    # --- Salesperson allow list ----------------------------------------
+    # --- Salesperson: broad operational access -------------------------
     def test_salesperson_allowed_pages(self):
         self.client.force_login(self.rep)
         for name in ['panel:sale_list', 'panel:client_list',
-                     'panel:product_list', 'panel:inventory_list']:
+                     'panel:product_list', 'panel:inventory_list',
+                     'panel:shipment_list', 'panel:employee_list',
+                     'panel:manager_list', 'panel:supplier_list',
+                     'panel:area_list', 'panel:lost_product_list']:
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 200, f"{name} should be allowed")
 
-    def test_salesperson_denied_manager_pages(self):
+    def test_salesperson_denied_financial_pages(self):
         self.client.force_login(self.rep)
         home = reverse('panel:sale_list')
-        for name in ['panel:shipment_list', 'panel:net_profit_dashboard',
-                     'panel:expense_list', 'panel:supplier_list',
-                     'panel:employee_list', 'panel:manager_list']:
+        denied = [
+            'panel:index', 'panel:net_profit_dashboard',
+            'panel:shipment_profit_report', 'panel:expense_list',
+            'panel:sale_commissions',
+            # view-only entities: create/edit blocked
+            'panel:shipment_create', 'panel:employee_add',
+            'panel:manager_add', 'panel:supplier_add',
+            # whole finance app blocked by path prefix
+            'financial_dashboard',
+        ]
+        for name in denied:
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 302, f"{name} should be denied")
             self.assertEqual(resp['Location'], home)
@@ -78,3 +90,12 @@ class AccessControlTests(TestCase):
         self.client.force_login(self.manager)
         mgr_html = self.client.get(url).content.decode()
         self.assertIn('تكلفة الوحدة', mgr_html)      # manager still sees costs
+
+    def test_shipment_list_hides_costs_for_salesperson(self):
+        url = reverse('panel:shipment_list')
+
+        self.client.force_login(self.rep)
+        self.assertNotIn('تكلفة', self.client.get(url).content.decode())
+
+        self.client.force_login(self.manager)
+        self.assertIn('تكلفة', self.client.get(url).content.decode())

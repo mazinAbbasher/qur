@@ -30,9 +30,11 @@
           <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-gray-50 rounded p-4">
               <div class="mb-2"><span class="font-semibold">مبيعات الشهر:</span> {{ total_sales|floatformat:2|intcomma }}</div>
+              {% if is_manager %}
               <div class="mb-2"><span class="font-semibold">نسبة العمولة:</span> {{ commission_percentage|floatformat:2 }}%</div>
               <div class="mb-2"><span class="font-semibold">قيمة العمولة:</span> {{ commission_amount|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}</div>
+              {% endif %}
             </div>
             <div class="flex flex-col justify-center">
               <div class="mb-2 font-semibold">الموظفون التابعون:</div>
@@ -45,6 +47,7 @@
               </ul>
             </div>
           </div>
+          {% if is_manager %}
           <div class="mb-6">
             <h6 class="font-bold mt-6 mb-2 text-gray-700">دفع عمولة للمدير:</h6>
             <form method="post" action="{% url 'panel:manager_commission_pay' manager.pk %}" class="flex flex-wrap gap-2 items-center">
@@ -82,6 +85,7 @@
               </tbody>
             </table>
           </div>
+          {% endif %}
           <h6 class="font-bold mt-6 mb-2 text-gray-700">مبيعات الموظفين لهذا الشهر:</h6>
           <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200 border">

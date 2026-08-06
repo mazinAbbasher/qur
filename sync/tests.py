@@ -10,7 +10,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from panel.models import (
@@ -26,6 +26,9 @@ def row(label, sync_id, deleted=False, **fields):
             'is_deleted': deleted, 'fields': fields}
 
 
+# Pin the role so tests are deterministic regardless of the machine's .env
+# (this box is configured as a live salesperson node). 'server' = tracking off.
+@override_settings(SYNC_ROLE='server')
 class SyncSetup(TestCase):
     def setUp(self):
         self.sales_node = Node.objects.create(
