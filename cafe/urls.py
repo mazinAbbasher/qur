@@ -19,6 +19,10 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    # Login / logout / password management (login template: registration/login.html)
+    path('accounts/', include('django.contrib.auth.urls')),
+    # Token-authenticated sync API + node UI (wired up in the sync app).
+    path('sync/', include('sync.urls')),
     path('', include('panel.urls')),
     path('finance/', include('finance.urls')),
     path('', include('pwa.urls')),  # هذا مهم جدًا

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+
+      <div class="card shadow mb-4">
+        <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">مزامنة البيانات</h5>
+          <span class="badge bg-light text-dark">{{ node_name }} — {{ role }}</span>
+        </div>
+        <div class="card-body">
+
+          {% if not configured %}
+            <div class="alert alert-warning">
+              لم يتم إعداد المزامنة على هذا الجهاز بعد. اضبط <code>SYNC_SERVER_URL</code>
+              و <code>SYNC_NODE_TOKEN</code> في ملف <code>.env</code> (انظر <code>.env.example</code>).
+            </div>
+          {% endif %}
+
+          <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+              <div class="border rounded-3 p-3 text-center">
+                <div class="text-muted small">بانتظار الرفع</div>
+                <div class="h4 mb-0 {% if pending %}text-warning{% else %}text-success{% endif %}">{{ pending }}</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded-3 p-3 text-center">
+                <div class="text-muted small">تعارضات مفتوحة</div>
+                <div class="h4 mb-0 {% if open_conflicts %}text-danger{% else %}text-success{% endif %}">{{ open_conflicts }}</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded-3 p-3 text-center">
+                <div class="text-muted small">آخر تنزيل</div>
+                <div class="small mb-0">{{ last_pulled_at|default:"—" }}</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded-3 p-3 text-center">
+                <div class="text-muted small">آخر رفع</div>
+                <div class="small mb-0">{{ last_pushed_at|default:"—" }}</div>
+              </div>
+            </div>
+          </div>
+
+          <form method="post" action="{% url 'sync:run' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn bg-gradient-info text-white px-4"
+                    {% if not configured %}disabled{% endif %}>
+              <i class="bi bi-arrow-repeat"></i> {{ button_label }}
+            </button>
+            <span class="text-muted small ms-2">
+              يرفع بياناتك الجديدة إلى الخادم ثم ينزّل آخر التحديثات.
+            </span>
+          </form>
+
+        </div>
+      </div>
+
+      <div class="card shadow">
+        <div class="card-header bg-light"><h6 class="mb-0">آخر عمليات المزامنة</h6></div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>الوقت</th><th>النوع</th><th>رفع</th><th>تنزيل</th>
+                  <th>تعارضات</th><th>الحالة</th><th>ملاحظات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for log in recent_logs %}
+                <tr>
+                  <td class="small">{{ log.started_at|date:"Y-m-d H:i" }}</td>
+                  <td>{{ log.direction }}</td>
+                  <td>{{ log.pushed }}</td>
+                  <td>{{ log.pulled }}</td>
+                  <td>{{ log.conflicts }}</td>
+                  <td>
+                    {% if log.ok %}<span class="badge bg-success">تمت</span>
+                    {% else %}<span class="badge bg-danger">فشل</span>{% endif %}
+                  </td>
+                  <td class="small text-muted">{{ log.message }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center text-muted py-3">لا يوجد سجل مزامنة بعد.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}

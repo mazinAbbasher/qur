@@ -38,30 +38,19 @@
     }
 
     /*
-     * Fix blank dropdown options.
-     * When the OS/browser is in dark mode, Chromium renders the native <select>
-     * popup dark and the theme's dark option text becomes invisible (and CSS
-     * backgrounds on <option> are ignored in that mode). Forcing color-scheme:light
-     * makes the browser draw all form-control popups in light mode, so the dark
-     * option labels are readable. The explicit option colors are a belt-and-braces
-     * fallback for browsers that DO honour them.
+     * The purchase / add-client forms are rendered by crispy-tailwind, whose select
+     * markup (appearance-none inside a position:relative wrapper) triggered a Chromium
+     * paint bug where option labels stayed blank until a repaint. The real fix is the
+     * project override at templates/tailwind/layout/select.html, which renders a plain
+     * Bootstrap .form-select like every other (working) form. These option colours are
+     * just a harmless readability fallback.
      */
     :root { color-scheme: light; }
-    html, body,
-    select, .form-select, .form-control,
-    input, textarea {
-        color-scheme: light;
-    }
     select option,
     .form-select option,
     .form-control option {
         color: #212529 !important;
         background-color: #ffffff !important;
-    }
-    /* Keep the closed control readable too (avoid inheriting a light/none color). */
-    select.form-control,
-    select.form-select {
-        color: #495057;
     }
     </style>
   <meta charset="utf-8" />
@@ -110,7 +99,7 @@ Equatorial</title>
     <nav class="navbar navbar-main navbar-expand-lg px-0 mx-4 shadow-none border-radius-xl" id="navbarBlur" data-scroll="true">
         <div class="container-fluid py-1 px-3">
         <div class="collapse navbar-collapse mt-sm-0 mt-2 me-md-0 me-sm-4" id="navbar">
-            <ul class="navbar-nav  justify-content-end">
+            <ul class="navbar-nav  justify-content-end align-items-center">
                 <li class="nav-item d-xl-none ps-3 pt-3 d-flex align-items-center">
                     <a href="javascript:;" class="nav-link text-body p-0" id="iconNavbarSidenav">
                     <div class="sidenav-toggler-inner">
@@ -120,6 +109,20 @@ Equatorial</title>
                     </div>
                     </a>
                 </li>
+                {% if user.is_authenticated %}
+                <li class="nav-item d-flex align-items-center ps-3">
+                    <span class="text-sm text-dark font-weight-bold">{{ user.username }}</span>
+                    <span class="badge bg-gradient-{% if is_manager %}dark{% else %}info{% endif %} ms-2">
+                        {% if is_manager %}الإدارة{% else %}مندوب{% endif %}
+                    </span>
+                </li>
+                <li class="nav-item d-flex align-items-center ps-3">
+                    <form method="post" action="{% url 'logout' %}" class="m-0">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm bg-gradient-secondary mb-0">خروج</button>
+                    </form>
+                </li>
+                {% endif %}
             </ul>
             </div>
         </div> 

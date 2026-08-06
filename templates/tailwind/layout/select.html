@@ -1,0 +1,22 @@
+{% load crispy_forms_filters %}
+{% load tailwind_filters %}
+{% load l10n %}
+{% comment %}
+  Project override of crispy-tailwind's select template.
+
+  The stock crispy-tailwind template renders <select class="... appearance-none ...">
+  wrapped in <div class="relative"> with a custom SVG arrow. On real (non-headless)
+  Chromium that combination triggers a paint bug where the option list stays blank
+  until a repaint (which is why options only showed after opening dev tools). Rendering
+  a plain Bootstrap `.form-select` — exactly like every other form in this app that
+  already works — renders reliably.
+{% endcomment %}
+<select name="{{ field.html_name }}" class="form-select" {{ field|build_attrs }}>
+    {% for group, options, index in field|optgroups %}
+        {% if group %}<optgroup label="{{ group }}">{% endif %}
+        {% for option in options %}
+            {% include "tailwind/layout/select_option.html" %}
+        {% endfor %}
+        {% if group %}</optgroup>{% endif %}
+    {% endfor %}
+</select>

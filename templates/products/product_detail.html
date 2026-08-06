@@ -9,6 +9,7 @@
       <h4 class="mb-1 fw-bold">{{ product.name }}</h4>
       <span class="text-muted">{{ product.description|default:"لا يوجد وصف" }}</span>
     </div>
+    {% if is_manager %}
     <div class="d-flex gap-2">
       <a href="{% url 'panel:product_stock_movement' product.pk %}" class="btn bg-gradient-info text-white">
         <i class="bi bi-arrow-left-right"></i> حركة المخزون
@@ -17,6 +18,7 @@
         <i class="bi bi-pencil"></i> تعديل
       </a>
     </div>
+    {% endif %}
   </div>
 
   <!-- Summary cards -->
@@ -70,8 +72,10 @@
             <dd class="col-7">{{ product.unit|default:"-" }}</dd>
             <dt class="col-5 text-muted">سعر الصرف</dt>
             <dd class="col-7">{{ product.exchange_rate|default:"-"|intcomma }}</dd>
+            {% if is_manager %}
             <dt class="col-5 text-muted">آخر تكلفة (SDG)</dt>
             <dd class="col-7">{{ latest_cost_sdg|floatformat:0|intcomma }}</dd>
+            {% endif %}
             <dt class="col-5 text-muted">الوصف</dt>
             <dd class="col-7">{{ product.description|default:"-" }}</dd>
           </dl>
@@ -116,7 +120,8 @@
     </div>
   </div>
 
-  <!-- Purchase history -->
+  <!-- Purchase history (manager only: exposes purchase costs & suppliers) -->
+  {% if is_manager %}
   <div class="card shadow-sm mt-4">
     <div class="card-header bg-light">
       <h6 class="mb-0">تاريخ الشراء (الوارد)</h6>
@@ -154,6 +159,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 
   <!-- Related customers -->
   <div class="card shadow-sm mt-4">

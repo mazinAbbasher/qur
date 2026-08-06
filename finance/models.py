@@ -3,12 +3,15 @@ from django.utils import timezone
 from decimal import Decimal
 from django.contrib import admin
 from django.core.exceptions import ValidationError
+
+# Finance models also carry sync identity so the manager laptop stays in sync.
+from sync.mixins import SyncModel
  
 from django.db.models.functions import Coalesce
 from django.db.models import Sum, Q, F, ExpressionWrapper, DecimalField
 
 
-class Currency(models.Model):
+class Currency(SyncModel):
     """
     Supported currencies for the company.
     """
@@ -28,7 +31,7 @@ class CurrencyAdmin(admin.ModelAdmin):
     list_display = ['code', 'name']
     search_fields = ['code', 'name']
 
-class FinancialLog(models.Model):
+class FinancialLog(SyncModel):
     """
     Logs every financial operation for auditing and accountability.
     """
@@ -50,7 +53,7 @@ class FinancialLog(models.Model):
     def __str__(self):
         return f"{self.get_operation_type_display()} {self.amount} {self.currency} at {self.timestamp}"
 
-class CurrencyExchange(models.Model):
+class CurrencyExchange(SyncModel):
     sold_currency = models.ForeignKey(Currency, on_delete=models.CASCADE, related_name='exchanges_as_sold')
     bought_currency = models.ForeignKey(Currency, on_delete=models.CASCADE, related_name='exchanges_as_bought')
     sold_amount = models.DecimalField(max_digits=16, decimal_places=2)
@@ -73,7 +76,7 @@ class CurrencyExchange(models.Model):
     def __str__(self):
         return f"{self.sold_amount} {self.sold_currency.code} → {self.bought_amount} {self.bought_currency.code} @ {self.exchange_rate:.4f}"
 
-class Partner(models.Model):
+class Partner(SyncModel):
     """
     Represents a company partner/funder.
     """
@@ -109,7 +112,7 @@ class Partner(models.Model):
         return balances
 
 
-class PartnerTransaction(models.Model):
+class PartnerTransaction(SyncModel):
     """
     Records a deposit or withdrawal for a partner.
     """

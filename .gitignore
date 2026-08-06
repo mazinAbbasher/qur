@@ -12,3 +12,6 @@ venv/
 # /images/
 # /static/
 # !/api/static/
+
+# Local database backups
+db.sqlite3.bak*

@@ -5,15 +5,19 @@ from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 import random
 
+# Every business model inherits sync identity (sync_id / sync_updated_at /
+# is_deleted). See sync/mixins.py. The existing integer PKs are kept as-is.
+from sync.mixins import SyncModel
+
 USD_TO_SDG_RATE = Decimal('600')  # Example conversion rate
 
-class Area(models.Model):
+class Area(SyncModel):
     name = models.CharField(max_length=100)
 
     def __str__(self):
         return self.name
 
-class Client(models.Model):
+class Client(SyncModel):
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=20, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
@@ -22,7 +26,7 @@ class Client(models.Model):
     def __str__(self):
         return self.name
 
-class Employee(models.Model):
+class Employee(SyncModel):
     name = models.CharField(max_length=100)
     commission_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # %
     sales_target = models.DecimalField(max_digits=12, decimal_places=2, default=0, verbose_name="الهدف الشهري")
@@ -78,14 +82,14 @@ class Employee(models.Model):
             from django.core.exceptions import ValidationError
             raise ValidationError("نسبة العمولة يجب أن تكون بين 0 و 100.")
 
-class ExchangeRate(models.Model):
+class ExchangeRate(SyncModel):
     rate = models.DecimalField(max_digits=12, decimal_places=2)
     updated_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
         return f"Rate: {self.rate} at {self.updated_at}"
 
-class Product(models.Model):
+class Product(SyncModel):
     CATEGORY_CHOICES = [
         ('med', 'Medicine'),
         ('sup', 'Supplement'),
@@ -118,7 +122,7 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
-class Supplier(models.Model):
+class Supplier(SyncModel):
     name = models.CharField(max_length=100)
     phone = models.CharField(max_length=30, blank=True, null=True)
     address = models.CharField(max_length=255, blank=True, null=True)
@@ -154,7 +158,7 @@ class Supplier(models.Model):
         # For future extensibility, not strictly needed as balance is property
         pass
 
-class Shipment(models.Model):
+class Shipment(SyncModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     shipment_cost = models.DecimalField(max_digits=12, decimal_places=2)
@@ -199,7 +203,7 @@ class Shipment(models.Model):
     def __str__(self):
         return f"Shipment of {self.product.name} ({self.quantity})"
 
-class SupplierPayment(models.Model):
+class SupplierPayment(SyncModel):
     supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
@@ -223,7 +227,7 @@ def update_supplier_on_payment_delete(sender, instance, **kwargs):
 
 post_delete.connect(update_supplier_on_payment_delete, sender=SupplierPayment)
 
-class Inventory(models.Model):
+class Inventory(SyncModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='inventories')
     shipment = models.OneToOneField(Shipment, on_delete=models.CASCADE, related_name='inventory')
     quantity = models.PositiveIntegerField(default=0)
@@ -231,7 +235,7 @@ class Inventory(models.Model):
     def __str__(self):
         return f"{self.product.name} - Batch {self.shipment.batch_number} (Exp: {self.shipment.expiry_date})"
 
-class LostProduct(models.Model):
+class LostProduct(SyncModel):
     product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='lost_products')
     inventory = models.ForeignKey(Inventory, on_delete=models.CASCADE, related_name='lost_products')
     quantity = models.PositiveIntegerField()
@@ -239,6 +243,11 @@ class LostProduct(models.Model):
     lost_at = models.DateTimeField(default=timezone.now)
 
     def save(self, *args, **kwargs):
+        # During sync apply, just persist the row; stock is recomputed
+        # authoritatively on the server (avoids double-deducting).
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().save(*args, **kwargs)
         # Deduct from inventory only on creation
         if not self.pk:
             if self.quantity > self.inventory.quantity:
@@ -250,7 +259,7 @@ class LostProduct(models.Model):
     def __str__(self):
         return f"Lost {self.quantity} of {self.product.name} (Batch {self.inventory.shipment.batch_number})"
 
-class Sale(models.Model):
+class Sale(SyncModel):
     client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True, blank=True)
     employee = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
@@ -267,7 +276,7 @@ class Sale(models.Model):
     def __str__(self):
         return f"Sale #{self.pk}"
 
-class SaleItem(models.Model):
+class SaleItem(SyncModel):
     sale = models.ForeignKey(Sale, related_name='items', on_delete=models.CASCADE)
     inventory = models.ForeignKey('Inventory', on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
@@ -301,7 +310,7 @@ class SaleItem(models.Model):
     def __str__(self):
         return f"{self.quantity} x {self.inventory.product.name} (Batch {self.inventory.shipment.batch_number})"
 
-class ReturnedProduct(models.Model):
+class ReturnedProduct(SyncModel):
     sale = models.ForeignKey('Sale', on_delete=models.CASCADE, related_name='returned_products')
     sale_item = models.ForeignKey('SaleItem', on_delete=models.CASCADE, related_name='returns')
     quantity = models.PositiveIntegerField()
@@ -309,6 +318,11 @@ class ReturnedProduct(models.Model):
     note = models.CharField(max_length=255, blank=True, null=True)
 
     def save(self, *args, **kwargs):
+        # During sync apply, persist only; stock/totals are recomputed
+        # authoritatively on the server.
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().save(*args, **kwargs)
         # On creation, increase inventory and decrease sale total
         if not self.pk:
             # Increase inventory
@@ -333,7 +347,7 @@ class ReturnedProduct(models.Model):
     def __str__(self):
         return f"Returned {self.quantity} of {self.sale_item.inventory.product.name} (Sale #{self.sale.pk})"
 
-class Invoice(models.Model):
+class Invoice(SyncModel):
     sale = models.OneToOneField(Sale, on_delete=models.CASCADE)
     created_at = models.DateTimeField(default=timezone.now)
     file_path = models.CharField(max_length=255, blank=True, null=True)
@@ -386,7 +400,7 @@ class Invoice(models.Model):
     def __str__(self):
         return f"Invoice #{self.number or self.pk} for Sale #{self.sale.pk}"
 
-class InvoicePayment(models.Model):
+class InvoicePayment(SyncModel):
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name='payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
@@ -405,7 +419,7 @@ def update_invoice_on_payment_delete(sender, instance, **kwargs):
 
 post_delete.connect(update_invoice_on_payment_delete, sender=InvoicePayment)
 
-class Expense(models.Model):
+class Expense(SyncModel):
     # CATEGORY_CHOICES = [
     #     ('rent', 'إيجار'),
     #     ('salary', 'رواتب'),
@@ -423,7 +437,7 @@ class Expense(models.Model):
     def __str__(self):
         return f"Expense: {self.description} ({self.amount})"
 
-class Commission(models.Model):
+class Commission(SyncModel):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE)
     sale = models.ForeignKey(Sale, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=12, decimal_places=2)  # total commission for this sale
@@ -445,7 +459,7 @@ class Commission(models.Model):
     def __str__(self):
         return f"Commission for {self.employee.name} on Sale #{self.sale.pk}"
 
-class CommissionPayment(models.Model):
+class CommissionPayment(SyncModel):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='commission_payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
@@ -459,6 +473,11 @@ class CommissionPayment(models.Model):
     commissions = models.ManyToManyField(Commission, blank=True, related_name='payments')
 
     def save(self, *args, **kwargs):
+        # During sync apply, persist only. Re-running FIFO distribution would
+        # double-pay commissions; the Commission rows are synced separately.
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().save(*args, **kwargs)
         super().save(*args, **kwargs)
         # Distribute payment to unpaid commissions (FIFO)
         commissions = Commission.objects.filter(employee=self.employee).order_by('created_at')
@@ -484,6 +503,11 @@ def update_employee_commissions(sender, instance, **kwargs):
     Recalculate only the unpaid portion of commissions for this employee whenever their commission_percentage changes.
     Paid portions remain unchanged and are not recalculated.
     """
+    # Applying a synced Employee row must not recompute commissions locally —
+    # Commission rows arrive through sync with their authoritative amounts.
+    from sync.tracking import sync_apply_active
+    if sync_apply_active():
+        return
     from .models import Sale, Commission
     sales = Sale.objects.filter(employee=instance)
     for sale in sales:
@@ -504,7 +528,7 @@ def update_employee_commissions(sender, instance, **kwargs):
                     commission_obj.amount = paid + (float(commission_obj.unpaid_amount) * float(exchange))
                     commission_obj.save()
 
-class Manager(models.Model):
+class Manager(SyncModel):
     name = models.CharField(max_length=100, blank = False, null = False)
     employees = models.ManyToManyField(Employee, related_name='managers', blank = False, null = False)
     commission_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)  # %
@@ -513,7 +537,7 @@ class Manager(models.Model):
     def __str__(self):
         return self.name
 
-class ManagerCommissionPayment(models.Model):
+class ManagerCommissionPayment(SyncModel):
     manager = models.ForeignKey('Manager', on_delete=models.CASCADE, related_name='commission_payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_at = models.DateTimeField(default=timezone.now)
