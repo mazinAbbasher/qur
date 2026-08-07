@@ -92,6 +92,25 @@ class RolePolicyTests(SyncSetup):
         self.assertIn('panel.Shipment', resp.json()['rejected'])
         self.assertEqual(Shipment.objects.count(), before)  # nothing created
 
+    def test_salesperson_cannot_push_product(self):
+        # Products are view-only for reps; the server must reject their pushes
+        # (this is the 'rejected [panel.Product]' note in the sync log).
+        resp = self.push('tok-sales', [
+            row('panel.Product', self.product.sync_id, name='Hacked', exchange_rate=1),
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('panel.Product', resp.json()['rejected'])
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.name, 'Med A')  # unchanged
+
+    def test_manager_can_push_product(self):
+        resp = self.push('tok-mgr', [
+            row('panel.Product', self.product.sync_id, name='Med A', exchange_rate=700),
+        ])
+        self.assertEqual(resp.json()['applied'], 1)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.exchange_rate, 700)
+
     def test_manager_can_push_shipment(self):
         resp = self.push('tok-mgr', [
             row('panel.Shipment', uuid.uuid4(), product=str(self.product.sync_id),

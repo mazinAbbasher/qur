@@ -44,7 +44,9 @@ _SPECS = [
     SyncSpec('panel.Manager', 'reference', salesperson_readable=True, salesperson_writable=False,
              sensitive_fields=('commission_percentage',)),
     SyncSpec('panel.ExchangeRate', 'reference', salesperson_readable=False, salesperson_writable=False),
-    SyncSpec('panel.Product', 'reference', salesperson_readable=True, salesperson_writable=True),
+    # View-only for salespeople: the catalog (and exchange rate, which drives
+    # cost/price conversion) is manager-managed. Reps see products but can't edit.
+    SyncSpec('panel.Product', 'reference', salesperson_readable=True, salesperson_writable=False),
     SyncSpec('panel.Shipment', 'reference', salesperson_readable=True, salesperson_writable=False,
              sensitive_fields=('cost_usd', 'cost_sdg', 'shipment_cost', 'supplier')),
     SyncSpec('panel.Inventory', 'reference', salesperson_readable=True, salesperson_writable=False),

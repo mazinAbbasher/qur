@@ -54,6 +54,7 @@ class AccessControlTests(TestCase):
             'panel:shipment_profit_report', 'panel:expense_list',
             'panel:sale_commissions',
             # view-only entities: create/edit blocked
+            'panel:product_add',
             'panel:shipment_create', 'panel:employee_add',
             'panel:manager_add', 'panel:supplier_add',
             # whole finance app blocked by path prefix

@@ -93,6 +93,10 @@ MANAGER_ONLY_VIEWS = {
     # Purchasing & staff/pay records are VIEW-ONLY for reps (they can open the
     # lists/details, with cost/commission columns hidden, but not create/edit —
     # those carry financial data and are manager functions).
+    # Products are catalog/reference data (exchange rate drives cost conversion) —
+    # reps view but don't edit.
+    'panel:product_add', 'panel:product_edit', 'panel:product_delete',
+    'panel:product_stock_movement', 'panel:product_stock_movement_pdf',
     'panel:shipment_create', 'panel:shipment_edit', 'panel:shipment_delete',
     'panel:employee_add', 'panel:employee_edit', 'panel:employee_delete',
     'panel:manager_add', 'panel:manager_edit', 'panel:manager_delete',
