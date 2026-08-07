@@ -14,6 +14,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 
+from finance.models import Currency
 from panel.models import (
     Client, Employee, Inventory, Product, Sale, SaleItem, Shipment,
 )
@@ -320,3 +321,56 @@ class PushCollisionTests(SyncSetup):
         self.assertEqual(sale.total, Decimal('2000'))
         self.assertEqual(stats['conflicts'], 0)
         self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
+
+
+class ReferenceIdentityTests(SyncSetup):
+    """A seed reference row (Currency) carries a different sync_id per database
+    when nodes were seeded before ids were deterministic. Pulling the server's
+    copy must reconcile it onto the local row by its unique natural key
+    (``code``) instead of inserting a duplicate — which used to trip
+    ``UNIQUE constraint failed: finance_currency.code`` and abort the whole pull.
+
+    The three currencies already exist here: the 0006 seed migration runs during
+    test-database setup, exactly as on a real laptop.
+    """
+
+    def test_currency_reconciled_by_code_not_duplicated(self):
+        local = Currency.objects.get(code='USD')      # seeded locally
+        server_sync_id = uuid.uuid4()                 # server's divergent id
+        self.assertNotEqual(str(local.sync_id), str(server_sync_id))
+
+        stats = apply_batch(
+            [row('finance.Currency', server_sync_id, code='USD', name='US Dollar')],
+            is_pull=True, node_name='mgr-1')
+
+        self.assertEqual(Currency.objects.filter(code='USD').count(), 1)  # no dupe
+        local.refresh_from_db()
+        self.assertEqual(str(local.sync_id), str(server_sync_id))         # id adopted
+        self.assertEqual(local.name, 'US Dollar')                         # content updated
+        self.assertEqual(stats['applied'], 1)
+
+    def test_currency_reconciled_even_when_content_matches(self):
+        # Same name on both sides: only the identity differs. The sync_id must
+        # still converge so future pulls (and FK references) resolve.
+        local = Currency.objects.get(code='SDG')
+        server_sync_id = uuid.uuid4()
+
+        apply_batch(
+            [row('finance.Currency', server_sync_id, code='SDG', name=local.name)],
+            is_pull=True, node_name='mgr-1')
+
+        self.assertEqual(Currency.objects.filter(code='SDG').count(), 1)
+        local.refresh_from_db()
+        self.assertEqual(str(local.sync_id), str(server_sync_id))
+
+    def test_second_pull_is_a_clean_noop(self):
+        server_sync_id = uuid.uuid4()
+        name = Currency.objects.get(code='AED').name
+        r = row('finance.Currency', server_sync_id, code='AED', name=name)
+
+        apply_batch([r], is_pull=True, node_name='mgr-1')   # converges identity
+        stats = apply_batch([r], is_pull=True, node_name='mgr-1')  # already matches
+
+        self.assertEqual(Currency.objects.filter(code='AED').count(), 1)
+        self.assertEqual(stats['noop'], 1)
+        self.assertEqual(stats['applied'], 0)

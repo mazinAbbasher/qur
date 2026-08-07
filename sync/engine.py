@@ -25,7 +25,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .models import SyncConflict
-from .registry import SYNC_ORDER, is_shared_writable, specs_for_pull
+from .registry import SYNC_ORDER, get_spec, is_shared_writable, specs_for_pull
 from .serializers import (
     field_map, get_model, model_label, scalar_fields, serialize_instance, _from_json,
 )
@@ -83,6 +83,39 @@ def _log_missing_reference(label, row, node_name):
     else:
         _log_conflict('missing_reference', label, row['sync_id'],
                       detail=detail, incoming=row, node_name=node_name)
+
+
+def _natural_key_match(model, label, resolved):
+    """A local *reference* row that already holds the incoming row's unique
+    natural key under a different ``sync_id`` — or None.
+
+    Seed rows (currencies, above all) are created independently on each database,
+    so the same logical record ends up with a different random ``sync_id`` per
+    machine. Matching only by ``sync_id`` would try to INSERT a duplicate and
+    trip the unique constraint (``finance_currency.code``), aborting the whole
+    pull. When the natural key already exists locally we treat it as the same
+    record and adopt the incoming ``sync_id`` instead.
+
+    Restricted to ``reference`` models on purpose: a unique collision on
+    *transactional* data (e.g. two laptops minting the same ``Invoice.number``)
+    is a genuine conflict between distinct records, not one entity, and must
+    never be merged. Only single-column ``unique=True`` scalar fields are
+    considered — the exact shape of a seeded natural key like ``Currency.code``.
+    """
+    spec = get_spec(label)
+    if spec is None or spec.category != 'reference':
+        return None
+    fmap = field_map(model)
+    for name, val in resolved.items():
+        f = fmap.get(name)
+        if f is None or val is None or not getattr(f, 'unique', False):
+            continue
+        if isinstance(f, (dj_models.ForeignKey, dj_models.OneToOneField)):
+            continue
+        match = model.objects.filter(**{f.attname: val}).first()
+        if match is not None:
+            return match
+    return None
 
 
 def _differs(existing, model, resolved, incoming_deleted, incoming_fields):
@@ -189,6 +222,19 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
     if existing is None and incoming_deleted:
         stats['noop'] += 1
         return 'noop', None
+
+    # Same reference row, divergent identity: a seed row (e.g. a Currency) was
+    # created separately on each database and so carries a different sync_id here
+    # than upstream. Adopt the incoming id onto the local row rather than insert
+    # a duplicate that would trip its unique natural key and abort the pull. The
+    # id is persisted now so it converges even when nothing else about the row
+    # changed (the update below would otherwise be a no-op).
+    if existing is None:
+        match = _natural_key_match(model, label, resolved)
+        if match is not None:
+            match.sync_id = sync_id
+            match.save(update_fields=['sync_id', 'sync_updated_at'])
+            existing = match
 
     if existing is not None:
         if not _differs(existing, model, resolved, incoming_deleted, incoming_fields):
