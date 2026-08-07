@@ -16,6 +16,7 @@ Guarantees (this is where "reliable, no duplicates, no clobbering" lives):
 """
 
 from collections import defaultdict
+from decimal import Decimal
 from math import floor
 
 from django.db import models as dj_models
@@ -24,7 +25,7 @@ from django.db import transaction
 from .models import SyncConflict
 from .registry import SYNC_ORDER, specs_for_pull
 from .serializers import (
-    field_map, get_model, model_label, serialize_instance, _from_json,
+    field_map, get_model, model_label, scalar_fields, serialize_instance, _from_json,
 )
 from .tracking import apply_guard
 
@@ -99,6 +100,37 @@ def _apply_m2m(obj, model, incoming_fields):
         getattr(obj, f.name).set(related)
 
 
+def _placeholder_for(field):
+    """A neutral value for a NOT NULL column that arrived stripped.
+
+    Sensitive financial fields (e.g. ``Shipment.shipment_cost``) are removed
+    before a row is sent to a salesperson node. When such a row is inserted for
+    the first time, the stripped column has no value and — if it is NOT NULL with
+    no model default — the insert fails. A salesperson's shipment rows are
+    read-only and never pushed back to the server, so a placeholder here only
+    satisfies the local constraint; it can never overwrite the real value
+    upstream.
+    """
+    if isinstance(field, dj_models.DecimalField):
+        return Decimal('0')
+    if isinstance(field, (dj_models.IntegerField, dj_models.FloatField)):
+        return 0
+    if isinstance(field, dj_models.BooleanField):
+        return False
+    return ''
+
+
+def _fill_stripped_required(obj, model, resolved):
+    """Give any required scalar field missing from an incoming (stripped) row a
+    neutral placeholder, so a first-time insert doesn't hit a NOT NULL error."""
+    for f in scalar_fields(model):
+        if f.name in resolved:
+            continue
+        if f.null or f.has_default():
+            continue
+        setattr(obj, f.attname, _placeholder_for(f))
+
+
 def _apply_row(label, row, *, is_pull, node_name, stats):
     model = get_model(label)
     fmap = field_map(model)
@@ -147,6 +179,11 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
             setattr(obj, f.name, val)
         else:
             setattr(obj, f.attname, val)
+    # New row from a stripped (salesperson) payload: back-fill required columns
+    # the sender omitted so the insert doesn't violate a NOT NULL constraint.
+    # Existing rows already hold their prior values, so leave them untouched.
+    if existing is None:
+        _fill_stripped_required(obj, model, resolved)
     obj.is_deleted = incoming_deleted
     obj.save()
     _apply_m2m(obj, model, incoming_fields)

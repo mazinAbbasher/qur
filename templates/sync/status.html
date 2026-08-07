@@ -11,6 +11,14 @@
         </div>
         <div class="card-body">
 
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+
           {% if not configured %}
             <div class="alert alert-warning">
               لم يتم إعداد المزامنة على هذا الجهاز بعد. اضبط <code>SYNC_SERVER_URL</code>
