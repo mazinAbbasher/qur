@@ -372,13 +372,9 @@ class Invoice(SyncModel):
         super().save(*args, **kwargs)
 
     def update_status(self):
-        # Subtract returned products value from sale total
         from decimal import Decimal
-        # returned_total = sum(Decimal(str(r.value)) for r in self.sale.returned_products.all())
-        # print(returned_total)
         net_total = Decimal(str(self.sale.total))
         paid = self.paid_amount
-        print(paid, net_total)
         if paid >= net_total and net_total > 0:
             self.status = 'paid'
         elif paid > 0:
@@ -407,6 +403,13 @@ class InvoicePayment(SyncModel):
     note = models.CharField(max_length=255, blank=True, null=True)
 
     def save(self, *args, **kwargs):
+        # During sync apply, persist only; the invoice's status is carried by the
+        # pushed Invoice row (and recomputed authoritatively), so running the
+        # side-effecting update_status here would double-write and, on a server
+        # whose stdout is closed, its debug output used to crash the whole push.
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().save(*args, **kwargs)
         super().save(*args, **kwargs)
         self.invoice.update_status()
 
@@ -414,6 +417,11 @@ class InvoicePayment(SyncModel):
         return f"Payment {self.amount} for Invoice #{self.invoice.pk}"
 
 def update_invoice_on_payment_delete(sender, instance, **kwargs):
+    # A payment removed through sync apply must not re-derive status locally —
+    # the Invoice row propagates its own status (same contract as save()).
+    from sync.tracking import sync_apply_active
+    if sync_apply_active():
+        return
     invoice = instance.invoice
     invoice.update_status()
 
@@ -513,7 +521,6 @@ def update_employee_commissions(sender, instance, **kwargs):
     for sale in sales:
         for commission_obj in Commission.objects.filter(employee=instance, sale=sale):
             paid = float(commission_obj.paid_amount)
-            print(paid, commission_obj.amount, instance.commission_percentage)
             # Only update unpaid commissions
             if paid < commission_obj.amount:
                 if paid == 0:

@@ -16,7 +16,8 @@ from django.utils.dateparse import parse_datetime
 
 from finance.models import Currency
 from panel.models import (
-    Client, Employee, Inventory, Product, Sale, SaleItem, Shipment,
+    Client, Employee, Inventory, Invoice, InvoicePayment, Product, Sale,
+    SaleItem, Shipment,
 )
 from sync.client import _clamped_cursor
 from sync.engine import apply_batch
@@ -374,3 +375,47 @@ class ReferenceIdentityTests(SyncSetup):
         self.assertEqual(Currency.objects.filter(code='AED').count(), 1)
         self.assertEqual(stats['noop'], 1)
         self.assertEqual(stats['applied'], 0)
+
+
+class ApplySideEffectTests(SyncSetup):
+    """A pushed row must persist without firing its model's side effects during
+    apply. InvoicePayment.save() used to call invoice.update_status() mid-apply,
+    whose stray print crashed the whole push on a server with a closed stdout
+    (``OSError: [Errno 5]``). The status instead rides in on the Invoice row.
+    """
+
+    def _invoice(self):
+        sale = Sale.objects.create(total=Decimal('2000'))
+        SaleItem.objects.create(
+            sale=sale, inventory=self.inventory, quantity=2, price=Decimal('1000'))
+        return Invoice.objects.create(sale=sale, total=Decimal('2000'),
+                                      status='unpaid')
+
+    def test_pushed_payment_persists_without_recomputing_status(self):
+        invoice = self._invoice()
+        pay_id = uuid.uuid4()
+
+        stats = apply_batch(
+            [row('panel.InvoicePayment', pay_id, invoice=str(invoice.sync_id),
+                 amount='500', paid_at='2026-08-07T10:00:00+00:00')],
+            is_pull=False, node_name='rep-1', authoritative_inventory=True)
+
+        self.assertEqual(stats['applied'], 1)
+        self.assertTrue(InvoicePayment.objects.filter(sync_id=pay_id).exists())
+        invoice.refresh_from_db()
+        # update_status() was skipped during apply -> status untouched here.
+        self.assertEqual(invoice.status, 'unpaid')
+
+    def test_status_arrives_via_the_pushed_invoice_row(self):
+        invoice = self._invoice()
+
+        apply_batch(
+            [row('panel.Invoice', invoice.sync_id, sale=str(invoice.sale.sync_id),
+                 total='2000', status='partial', number=invoice.number),
+             row('panel.InvoicePayment', uuid.uuid4(),
+                 invoice=str(invoice.sync_id), amount='500',
+                 paid_at='2026-08-07T10:00:00+00:00')],
+            is_pull=False, node_name='rep-1', authoritative_inventory=True)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'partial')   # from the Invoice row
