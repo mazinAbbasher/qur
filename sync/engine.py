@@ -21,9 +21,11 @@ from math import floor
 
 from django.db import models as dj_models
 from django.db import transaction
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from .models import SyncConflict
-from .registry import SYNC_ORDER, specs_for_pull
+from .registry import SYNC_ORDER, is_shared_writable, specs_for_pull
 from .serializers import (
     field_map, get_model, model_label, scalar_fields, serialize_instance, _from_json,
 )
@@ -41,6 +43,46 @@ def _log_conflict(reason, label, sync_id, *, detail='', incoming=None,
 def _has_pending_local_change(label, sync_id):
     from .models import SyncOutbox
     return SyncOutbox.objects.filter(model_label=label, sync_id=sync_id).exists()
+
+
+def _row_ts(row):
+    """The ``sync_updated_at`` carried by a serialized row, as an aware datetime."""
+    raw = row.get('sync_updated_at')
+    if not raw:
+        return None
+    dt = parse_datetime(raw) if isinstance(raw, str) else raw
+    if dt is not None and timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_default_timezone())
+    return dt
+
+
+def _incoming_older(row, existing):
+    """True when a pushed row's edit time predates the server's current copy —
+    i.e. it would overwrite a newer version (a concurrent-edit collision)."""
+    inc = _row_ts(row)
+    cur = getattr(existing, 'sync_updated_at', None)
+    if inc is None or cur is None:
+        return False
+    return inc < cur
+
+
+def _log_missing_reference(label, row, node_name):
+    """Idempotent missing-reference log. The pull cursor now re-delivers an
+    unresolved row until its parent arrives, so update the existing record in
+    place instead of piling up a duplicate conflict on every retry."""
+    detail = 'Referenced record not found; will retry on next pull.'
+    conflict = SyncConflict.objects.filter(
+        model_label=label, sync_id=row['sync_id'], reason='missing_reference',
+    ).first()
+    if conflict is not None:
+        conflict.detail = detail
+        conflict.incoming = row
+        conflict.node_name = node_name
+        conflict.resolved = False
+        conflict.save()
+    else:
+        _log_conflict('missing_reference', label, row['sync_id'],
+                      detail=detail, incoming=row, node_name=node_name)
 
 
 def _differs(existing, model, resolved, incoming_deleted, incoming_fields):
@@ -159,6 +201,18 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
                           node_name=node_name)
             stats['conflicts'] += 1
             return 'conflict', existing
+        # Push side: two laptops can edit a shared record (Client/Area) between
+        # syncs. The server can't reliably order their clocks, so the push still
+        # wins — but if it overwrites a NEWER server copy we keep the loser in the
+        # conflict log so the collision is auditable rather than silent.
+        if (not is_pull and is_shared_writable(label)
+                and _incoming_older(row, existing)):
+            _log_conflict('stale_write', label, sync_id,
+                          detail='Concurrent edit overwritten on push (push wins); '
+                                 'previous server copy preserved here.',
+                          incoming=row, existing=serialize_instance(existing),
+                          node_name=node_name)
+            stats['conflicts'] += 1
 
     # Tombstone: actually remove the row (reproducing the origin's cascade /
     # SET_NULL) rather than just flagging it — the app's list views don't filter
@@ -249,7 +303,8 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
     ``authoritative_inventory`` - True when the server applies a push (recompute
                                   stock from source rows afterwards).
     """
-    stats = {'applied': 0, 'noop': 0, 'conflicts': 0, 'oversells': 0}
+    stats = {'applied': 0, 'noop': 0, 'conflicts': 0, 'oversells': 0,
+             'deferred_min': None}
     by_label = defaultdict(list)
     for r in rows:
         by_label[r['label']].append(r)
@@ -286,16 +341,21 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
                     _handle(label, status, result)
 
         # One retry pass — parents applied above may now satisfy FKs.
+        deferred_min = None
         for label, row in deferred:
             status, result = _apply_row(label, row, is_pull=is_pull,
                                         node_name=node_name, stats=stats)
             if status == 'deferred':
-                _log_conflict('missing_reference', label, row['sync_id'],
-                              detail='Referenced record not found after retry.',
-                              incoming=row, node_name=node_name)
+                # Still unresolved: log it and remember the oldest such row so
+                # the pull cursor won't advance past it (see client.pull).
+                _log_missing_reference(label, row, node_name)
                 stats['conflicts'] += 1
+                ts = _row_ts(row)
+                if ts is not None and (deferred_min is None or ts < deferred_min):
+                    deferred_min = ts
             else:
                 _handle(label, status, result)
+        stats['deferred_min'] = deferred_min
 
         # Authoritative stock recompute (server side, after applying a push).
         # select_for_update serialises concurrent pushes touching the same batch

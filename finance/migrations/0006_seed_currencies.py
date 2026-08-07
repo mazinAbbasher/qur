@@ -8,9 +8,17 @@ Currency.DoesNotExist — surfacing as the "currency" error when adding a purcha
 
 Seeding them here guarantees they are always present. It is idempotent
 (get_or_create by code) so it never clobbers an existing name.
+
+The ``sync_id`` is derived from the code (``currency_sync_id``) rather than a
+random uuid4, so every database seeds the *same* identity for a given currency.
+Otherwise each node would invent its own sync_id for 'USD', and pulling the
+server's copy would collide on the unique ``code`` (see migration 0007, which
+converges databases seeded before this was made deterministic).
 """
 
 from django.db import migrations
+
+from finance.sync_keys import currency_sync_id
 
 
 # code -> Arabic display name (matches names already in use in production data).
@@ -24,7 +32,10 @@ CURRENCIES = [
 def seed_currencies(apps, schema_editor):
     Currency = apps.get_model('finance', 'Currency')
     for code, name in CURRENCIES:
-        Currency.objects.get_or_create(code=code, defaults={'name': name})
+        Currency.objects.get_or_create(
+            code=code,
+            defaults={'name': name, 'sync_id': currency_sync_id(code)},
+        )
 
 
 def unseed_currencies(apps, schema_editor):

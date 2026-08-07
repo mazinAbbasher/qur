@@ -93,6 +93,14 @@ def is_syncable(label):
     return label in _BY_LABEL
 
 
+def is_shared_writable(label):
+    """True for a model multiple nodes can both read AND write (e.g. Client,
+    Area), so two laptops can edit the same record concurrently. Used to audit
+    stale overwrites on push — single-author models can't collide."""
+    spec = _BY_LABEL.get(label)
+    return bool(spec and spec.salesperson_readable and spec.salesperson_writable)
+
+
 def specs_for_pull(role):
     """Models the server may send to a node of ``role`` during pull."""
     if role == 'salesperson':

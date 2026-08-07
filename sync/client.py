@@ -15,6 +15,8 @@ All network calls have a timeout; any failure is caught and recorded in a
 (each apply runs in a single transaction).
 """
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -88,14 +90,33 @@ def push():
     return data
 
 
+def _clamped_cursor(server_cursor, deferred_min):
+    """Keep the pull cursor from advancing past a row we couldn't apply yet.
+
+    A row whose foreign key isn't present is logged as a conflict, not applied.
+    If the cursor jumped past it, the server (which only re-sends rows newer than
+    the cursor) would never offer it again — a silent, permanent skip. Clamping
+    to just before that row makes the next pull re-deliver it once its parent
+    exists; re-applying already-applied rows is a safe idempotent noop.
+    """
+    if deferred_min is None:
+        return server_cursor
+    gap = deferred_min - timedelta(microseconds=1)
+    if server_cursor is None or gap < server_cursor:
+        return gap
+    return server_cursor
+
+
 def pull():
     state = SyncState.get()
     since = state.last_pull_cursor
     data = _post('/sync/api/pull/', {'since': since.isoformat() if since else None})
     rows = data.get('changes', [])
     stats = apply_batch(rows, is_pull=True, node_name=getattr(settings, 'SYNC_NODE_NAME', ''))
-    if data.get('cursor'):
-        state.last_pull_cursor = parse_datetime(data['cursor'])
+    server_cursor = parse_datetime(data['cursor']) if data.get('cursor') else None
+    cursor = _clamped_cursor(server_cursor, stats.get('deferred_min'))
+    if cursor is not None:
+        state.last_pull_cursor = cursor
     state.last_pulled_at = timezone.now()
     state.save()
     stats['received'] = len(rows)

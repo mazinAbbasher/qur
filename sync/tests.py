@@ -7,15 +7,17 @@ order, oversell protection, tombstones, and no-clobber-on-pull.
 
 import json
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils.dateparse import parse_datetime
 
 from panel.models import (
     Client, Employee, Inventory, Product, Sale, SaleItem, Shipment,
 )
+from sync.client import _clamped_cursor
 from sync.engine import apply_batch
 from sync.models import Node, SyncConflict, SyncOutbox
 from sync.serializers import serialize_instance
@@ -237,3 +239,84 @@ class PullConflictTests(SyncSetup):
         self.assertEqual(client.name, 'Local Name')   # local kept
         self.assertEqual(stats['conflicts'], 1)
         self.assertTrue(SyncConflict.objects.filter(reason='stale_write').exists())
+
+
+class CursorClampTests(SyncSetup):
+    """Gap (a): a row we can't apply must not be skipped by the pull cursor."""
+
+    def _orphan_saleitem(self, ts):
+        # A SaleItem whose parent Sale is absent -> unresolved after retry.
+        r = row('panel.SaleItem', uuid.uuid4(), sale=str(uuid.uuid4()),
+                inventory=str(self.inventory.sync_id), quantity=1, price='2000')
+        r['sync_updated_at'] = ts
+        return r
+
+    def test_missing_reference_reports_deferred_min(self):
+        ts = '2026-05-01T12:00:00+00:00'
+        stats = apply_batch([self._orphan_saleitem(ts)], is_pull=True, node_name='rep-1')
+        self.assertEqual(stats['applied'], 0)
+        self.assertEqual(stats['deferred_min'], parse_datetime(ts))
+        self.assertEqual(
+            SyncConflict.objects.filter(reason='missing_reference').count(), 1)
+
+    def test_missing_reference_logged_once_across_retries(self):
+        r = self._orphan_saleitem('2026-05-01T12:00:00+00:00')
+        apply_batch([r], is_pull=True, node_name='rep-1')
+        apply_batch([r], is_pull=True, node_name='rep-1')  # re-delivered next pull
+        self.assertEqual(
+            SyncConflict.objects.filter(reason='missing_reference').count(), 1)
+
+    def test_clamped_cursor_stays_before_unapplied_row(self):
+        server_cursor = parse_datetime('2026-05-01T12:00:05+00:00')
+        deferred_min = parse_datetime('2026-05-01T12:00:00+00:00')
+        self.assertLess(_clamped_cursor(server_cursor, deferred_min), deferred_min)
+
+    def test_clamped_cursor_unchanged_without_deferral(self):
+        server_cursor = parse_datetime('2026-05-01T12:00:05+00:00')
+        self.assertEqual(_clamped_cursor(server_cursor, None), server_cursor)
+
+
+class PushCollisionTests(SyncSetup):
+    """Gap (b): a stale push over a shared record is applied but audited."""
+
+    def test_stale_push_wins_but_is_logged(self):
+        client = Client.objects.create(name='Server Name')
+        older = (client.sync_updated_at - timedelta(minutes=5)).isoformat()
+        incoming = row('panel.Client', client.sync_id, name='Rep Old Edit')
+        incoming['sync_updated_at'] = older
+
+        stats = apply_batch([incoming], is_pull=False, node_name='rep-1')
+
+        client.refresh_from_db()
+        self.assertEqual(client.name, 'Rep Old Edit')      # push still wins
+        self.assertEqual(stats['conflicts'], 1)
+        self.assertTrue(SyncConflict.objects.filter(
+            reason='stale_write', sync_id=client.sync_id).exists())
+
+    def test_fresh_push_is_not_flagged(self):
+        client = Client.objects.create(name='Server Name')
+        newer = (client.sync_updated_at + timedelta(minutes=5)).isoformat()
+        incoming = row('panel.Client', client.sync_id, name='Rep New Edit')
+        incoming['sync_updated_at'] = newer
+
+        stats = apply_batch([incoming], is_pull=False, node_name='rep-1')
+
+        client.refresh_from_db()
+        self.assertEqual(client.name, 'Rep New Edit')
+        self.assertEqual(stats['conflicts'], 0)
+        self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
+
+    def test_single_author_model_is_not_audited(self):
+        # Sale is write-only for reps (not shared), so no collision audit even
+        # when the incoming edit looks older than the server copy.
+        sale = Sale.objects.create(total=Decimal('1000'))
+        older = (sale.sync_updated_at - timedelta(minutes=5)).isoformat()
+        incoming = row('panel.Sale', sale.sync_id, total='2000')
+        incoming['sync_updated_at'] = older
+
+        stats = apply_batch([incoming], is_pull=False, node_name='rep-1')
+
+        sale.refresh_from_db()
+        self.assertEqual(sale.total, Decimal('2000'))
+        self.assertEqual(stats['conflicts'], 0)
+        self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
