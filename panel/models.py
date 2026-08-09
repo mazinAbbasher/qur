@@ -73,8 +73,12 @@ class Employee(SyncModel):
         return sum([c.unpaid_amount for c in commissions])
 
     def delete(self, *args, **kwargs):
-        # Cascade delete commissions
-        Commission.objects.filter(employee=self).delete()
+        # Commission has on_delete=CASCADE, so the database removes them together
+        # with the employee. Skip the manual pre-delete during sync apply (no
+        # side effects mid-batch); super().delete() still cascades.
+        from sync.tracking import sync_apply_active
+        if not sync_apply_active():
+            Commission.objects.filter(employee=self).delete()
         super().delete(*args, **kwargs)
 
     def clean(self):
@@ -211,19 +215,28 @@ class SupplierPayment(SyncModel):
 
     def save(self, *args, **kwargs):
         super().save(*args, **kwargs)
-        # Optionally, update supplier's balance or trigger any hooks
-        self.supplier.update_balance()
+        # update_balance() is a no-op today, but guard for parity with the other
+        # payment models so a future implementation can't run its side effects
+        # mid-apply (the bug class that bit InvoicePayment).
+        from sync.tracking import sync_apply_active
+        if not sync_apply_active():
+            self.supplier.update_balance()
 
     def delete(self, *args, **kwargs):
+        supplier = self.supplier
         super().delete(*args, **kwargs)
-        self.supplier.update_balance()
+        from sync.tracking import sync_apply_active
+        if not sync_apply_active():
+            supplier.update_balance()
 
     def __str__(self):
         return f"Payment {self.amount} to {self.supplier.name} at {self.paid_at}"
 
 def update_supplier_on_payment_delete(sender, instance, **kwargs):
-    supplier = instance.supplier
-    supplier.update_balance()
+    from sync.tracking import sync_apply_active
+    if sync_apply_active():
+        return
+    instance.supplier.update_balance()
 
 post_delete.connect(update_supplier_on_payment_delete, sender=SupplierPayment)
 
@@ -333,6 +346,13 @@ class ReturnedProduct(SyncModel):
         self.sale.calculate_total()
 
     def delete(self, *args, **kwargs):
+        # Mirror save(): during sync apply just remove the row. Stock and the
+        # sale total are recomputed authoritatively on the server and pulled
+        # down; adjusting them here would corrupt those synced values (on a
+        # laptop pull there is no recompute to correct it afterwards).
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().delete(*args, **kwargs)
         # On delete, decrease inventory and restore sale total
         self.sale_item.inventory.quantity -= self.quantity
         self.sale_item.inventory.save()
@@ -363,9 +383,13 @@ class Invoice(SyncModel):
 
     def save(self, *args, **kwargs):
         if not self.number:
-            # Generate a unique 6-digit number
+            # A 6-digit number whose leading digit is THIS node's SYNC_NODE_NUMBER,
+            # so invoices minted on different laptops occupy disjoint ranges and
+            # can never collide on the globally-unique `number` when they sync.
+            from django.conf import settings
+            prefix = str(int(getattr(settings, 'SYNC_NODE_NUMBER', 0)) % 10)
             while True:
-                num = f"{random.randint(100000, 999999)}"
+                num = f"{prefix}{random.randint(0, 99999):05d}"
                 if not Invoice.objects.filter(number=num).exists():
                     self.number = num
                     break

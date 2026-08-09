@@ -248,6 +248,11 @@ SYNC_SERVER_URL = os.environ.get('SYNC_SERVER_URL', '').rstrip('/')
 SYNC_NODE_TOKEN = os.environ.get('SYNC_NODE_TOKEN', '')
 # Friendly name for THIS laptop (used only in local sync logs).
 SYNC_NODE_NAME = os.environ.get('SYNC_NODE_NAME', 'this-laptop')
+# Distinct digit 0-9 for THIS node. It becomes the leading digit of every invoice
+# number minted here, so invoices created on different laptops draw from disjoint
+# ranges (1xxxxx vs 2xxxxx …) and can never collide when they sync. MUST be unique
+# per node — give the server 0 and each laptop its own digit. Coerced to 0-9.
+SYNC_NODE_NUMBER = int(os.environ.get('SYNC_NODE_NUMBER', '0') or '0') % 10
 # Network timeout (seconds) for outbound sync HTTP calls.
 SYNC_HTTP_TIMEOUT = int(os.environ.get('SYNC_HTTP_TIMEOUT', '30'))
 

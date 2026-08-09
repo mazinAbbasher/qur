@@ -85,36 +85,72 @@ def _log_missing_reference(label, row, node_name):
                       detail=detail, incoming=row, node_name=node_name)
 
 
+def _unique_field_groups(model):
+    """Tuples of field names that must be unique together for ``model`` —
+    ``unique_together`` plus any unconditional ``UniqueConstraint``. Used to spot
+    a divergent-id twin whose collision spans several columns (e.g. Commission's
+    ``(employee, sale)``)."""
+    groups = [tuple(ut) for ut in model._meta.unique_together]
+    for c in model._meta.constraints:
+        if isinstance(c, dj_models.UniqueConstraint) and not getattr(c, 'condition', None):
+            groups.append(tuple(c.fields))
+    return groups
+
+
 def _natural_key_match(model, label, resolved):
     """A local *reference* row that already holds the incoming row's unique
     natural key under a different ``sync_id`` — or None.
 
-    Seed rows (currencies, above all) are created independently on each database,
-    so the same logical record ends up with a different random ``sync_id`` per
-    machine. Matching only by ``sync_id`` would try to INSERT a duplicate and
-    trip the unique constraint (``finance_currency.code``), aborting the whole
-    pull. When the natural key already exists locally we treat it as the same
-    record and adopt the incoming ``sync_id`` instead.
+    Reference rows are created independently on each database, so the same
+    logical record ends up with a different random ``sync_id`` per machine
+    (a seeded Currency by ``code``, a Commission by ``(employee, sale)``, an
+    Inventory by its ``shipment``). Matching only by ``sync_id`` would try to
+    INSERT a duplicate and trip the unique constraint, aborting the whole batch.
+    When the natural key already exists locally we treat it as the same record
+    and adopt the incoming ``sync_id`` instead.
 
     Restricted to ``reference`` models on purpose: a unique collision on
     *transactional* data (e.g. two laptops minting the same ``Invoice.number``)
     is a genuine conflict between distinct records, not one entity, and must
-    never be merged. Only single-column ``unique=True`` scalar fields are
-    considered — the exact shape of a seeded natural key like ``Currency.code``.
+    never be merged. Both single-column uniques (scalar or a one-to-one/foreign
+    key) and multi-column unique constraints are considered.
     """
     spec = get_spec(label)
     if spec is None or spec.category != 'reference':
         return None
     fmap = field_map(model)
+
+    def _col_and_value(f, val):
+        # FK/O2O values resolve to an instance; match on the stored id column.
+        if isinstance(f, (dj_models.ForeignKey, dj_models.OneToOneField)):
+            return f.attname, (val.pk if val is not None else None)
+        return f.attname, val
+
+    # Single-column uniques — e.g. Currency.code, or Inventory.shipment (O2O).
     for name, val in resolved.items():
         f = fmap.get(name)
         if f is None or val is None or not getattr(f, 'unique', False):
             continue
-        if isinstance(f, (dj_models.ForeignKey, dj_models.OneToOneField)):
-            continue
-        match = model.objects.filter(**{f.attname: val}).first()
+        col, lookup_val = _col_and_value(f, val)
+        match = model.objects.filter(**{col: lookup_val}).first()
         if match is not None:
             return match
+
+    # Multi-column uniques — e.g. Commission (employee, sale).
+    for group in _unique_field_groups(model):
+        lookup = {}
+        complete = True
+        for fname in group:
+            f = fmap.get(fname)
+            if f is None or fname not in resolved:
+                complete = False
+                break
+            col, lookup_val = _col_and_value(f, resolved[fname])
+            lookup[col] = lookup_val
+        if complete and lookup:
+            match = model.objects.filter(**lookup).first()
+            if match is not None:
+                return match
     return None
 
 

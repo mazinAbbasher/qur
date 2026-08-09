@@ -16,8 +16,8 @@ from django.utils.dateparse import parse_datetime
 
 from finance.models import Currency
 from panel.models import (
-    Client, Employee, Inventory, Invoice, InvoicePayment, Product, Sale,
-    SaleItem, Shipment,
+    Client, Commission, Employee, Inventory, Invoice, InvoicePayment, Product,
+    Sale, SaleItem, Shipment, ReturnedProduct,
 )
 from sync.client import _clamped_cursor
 from sync.engine import apply_batch
@@ -419,3 +419,87 @@ class ApplySideEffectTests(SyncSetup):
 
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, 'partial')   # from the Invoice row
+
+    def test_pulled_return_deletion_leaves_local_stock_untouched(self):
+        # ReturnedProduct.delete() must skip its inventory/total side effects
+        # during apply — the server recomputes stock and it's pulled down. On a
+        # laptop pull there is no recompute, so touching stock here corrupts it.
+        sale = Sale.objects.create(total=Decimal('2000'))
+        item = SaleItem.objects.create(
+            sale=sale, inventory=self.inventory, quantity=2, price=Decimal('1000'))
+        rp_id = uuid.uuid4()
+        apply_batch(
+            [row('panel.ReturnedProduct', rp_id, sale=str(sale.sync_id),
+                 sale_item=str(item.sync_id), quantity=1,
+                 created_at='2026-08-07T10:00:00+00:00')],
+            is_pull=True, node_name='mgr-1')
+        self.inventory.refresh_from_db()
+        qty_before = self.inventory.quantity
+
+        apply_batch([row('panel.ReturnedProduct', rp_id, deleted=True)],
+                    is_pull=True, node_name='mgr-1')
+
+        self.assertFalse(ReturnedProduct.objects.filter(sync_id=rp_id).exists())
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, qty_before)  # guard held
+
+
+class InvoiceNumberTests(SyncSetup):
+    """Invoice numbers are prefixed with this node's digit so two laptops draw
+    from disjoint ranges and never collide on the unique `number` when syncing."""
+
+    @override_settings(SYNC_NODE_NUMBER=3)
+    def test_number_uses_node_prefix(self):
+        sale = Sale.objects.create(total=Decimal('1000'))
+        invoice = Invoice.objects.create(sale=sale, total=Decimal('1000'))
+        self.assertEqual(len(invoice.number), 6)
+        self.assertTrue(invoice.number.startswith('3'))
+
+    @override_settings(SYNC_NODE_NUMBER=7)
+    def test_two_nodes_ranges_do_not_overlap(self):
+        s1 = Sale.objects.create(total=Decimal('1'))
+        n7 = Invoice.objects.create(sale=s1, total=Decimal('1')).number
+        with override_settings(SYNC_NODE_NUMBER=2):
+            s2 = Sale.objects.create(total=Decimal('1'))
+            n2 = Invoice.objects.create(sale=s2, total=Decimal('1')).number
+        self.assertTrue(n7.startswith('7') and n2.startswith('2'))
+        self.assertNotEqual(n7, n2)
+
+
+class CompositeIdentityTests(SyncSetup):
+    """Reference rows created independently on two nodes share a natural key but
+    not a sync_id. Apply must reconcile them, not collide on the unique key."""
+
+    def test_commission_reconciled_by_employee_and_sale(self):
+        sale = Sale.objects.create(employee=self.employee, total=Decimal('1000'))
+        local = Commission.objects.create(
+            employee=self.employee, sale=sale, amount=Decimal('50'))
+        incoming_id = uuid.uuid4()
+        self.assertNotEqual(str(local.sync_id), str(incoming_id))
+
+        apply_batch(
+            [row('panel.Commission', incoming_id,
+                 employee=str(self.employee.sync_id), sale=str(sale.sync_id),
+                 amount='75', paid_amount='0')],
+            is_pull=False, node_name='mgr-2')
+
+        self.assertEqual(
+            Commission.objects.filter(employee=self.employee, sale=sale).count(), 1)
+        local.refresh_from_db()
+        self.assertEqual(str(local.sync_id), str(incoming_id))   # id adopted
+        self.assertEqual(local.amount, Decimal('75'))
+
+    def test_inventory_reconciled_by_shipment(self):
+        incoming_id = uuid.uuid4()
+        self.assertNotEqual(str(self.inventory.sync_id), str(incoming_id))
+
+        apply_batch(
+            [row('panel.Inventory', incoming_id, product=str(self.product.sync_id),
+                 shipment=str(self.shipment.sync_id), quantity=9)],
+            is_pull=True, node_name='mgr-1')
+
+        self.assertEqual(
+            Inventory.objects.filter(shipment=self.shipment).count(), 1)  # no dupe
+        self.inventory.refresh_from_db()
+        self.assertEqual(str(self.inventory.sync_id), str(incoming_id))
+        self.assertEqual(self.inventory.quantity, 9)
