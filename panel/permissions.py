@@ -68,12 +68,12 @@ def manager_required(view_func):
 
 
 # Salespeople get broad operational access. Only *purely financial* pages
-# (costs, profit, commissions, expenses and the whole finance app) stay
+# (net profit, profit reports, commissions and the whole finance app) stay
 # manager-only. This is a blocklist: anything not listed here is allowed, so
 # salespeople can manage sales, clients, products, inventory, shipments,
-# employees, managers, suppliers, areas and lost products — but the cost/profit
-# figures inside those pages are still hidden (templates) and never reach a
-# salesperson's laptop (sync strips them).
+# employees, managers, suppliers, areas, lost products and their own daily
+# expenses — but the cost/profit figures inside those pages are still hidden
+# (templates) and never reach a salesperson's laptop (sync strips them).
 MANAGER_ONLY_VIEWS = {
     # Financial dashboards / profit reports
     'panel:index',                       # the net-profit / totals dashboard
@@ -84,12 +84,11 @@ MANAGER_ONLY_VIEWS = {
     'panel:commission_pay',
     'panel:manager_commission_pay',
     'panel:get_employee_commission',
-    # Expenses (company spending)
-    'panel:expense_list',
-    'panel:expense_add',
-    'panel:expense_edit',
-    'panel:expense_delete',
-    'panel:expense_list_pdf',
+    # NOTE: expenses are intentionally NOT here — salespeople manage their own
+    # daily field expenses (add/edit/delete/list/PDF). The company-wide expense
+    # total stays private because expenses aren't synced back down to reps
+    # (see panel.Expense in sync/registry.py), and the SDG balance guard in
+    # expense_add/expense_edit is manager-only.
     # Purchasing & staff/pay records are VIEW-ONLY for reps (they can open the
     # lists/details, with cost/commission columns hidden, but not create/edit —
     # those carry financial data and are manager functions).

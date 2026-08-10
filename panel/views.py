@@ -24,6 +24,7 @@ import io
 from calendar import monthrange
 from finance.models import CurrencyExchange, Currency, get_latest_exchange_rate
 from finance.views import calculate_company_balance
+from panel.permissions import is_manager
 
 @register.filter
 def get_item(dictionary, key):
@@ -2071,12 +2072,17 @@ def expense_add(request):
         form = ExpenseForm(request.POST)
         expense = None  # ✅ initialize early to avoid UnboundLocalError
         if form.is_valid():
-            balance = calculate_company_balance(Currency.objects.get(code='SDG'))
-            amount = form.cleaned_data['amount']
-            if balance < amount:
-                # expense = None
-                form.add_error('amount', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية المصروف ({amount}).")
-                return render(request, 'expenses/expense_form.html', {'form': form, "active_sidebar": "expenses",'expense': expense})
+            # The SDG balance guard is a manager/server safeguard. A salesperson
+            # laptop doesn't hold the finance data it needs (currency exchanges,
+            # partner transactions, etc. aren't synced to reps), so the balance
+            # would read as ~0 and wrongly block every expense. Skip it for reps
+            # and let them log the expense; the server stays authoritative.
+            if is_manager(request.user):
+                balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+                amount = form.cleaned_data['amount']
+                if balance < amount:
+                    form.add_error('amount', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية المصروف ({amount}).")
+                    return render(request, 'expenses/expense_form.html', {'form': form, "active_sidebar": "expenses",'expense': expense})
 
             expense = form.save()
             messages.success(request, "تم إضافة المصروف بنجاح.")
@@ -2100,15 +2106,15 @@ def expense_edit(request, pk):
 
         form = ExpenseForm(request.POST, instance=expense)
         if form.is_valid():
-            print("skhdytuhk")
-            
             amount = form.cleaned_data['amount']
-            if amount > old_amount:
+            # Manager/server only: verify the SDG balance covers the increase.
+            # A salesperson laptop can't compute this (finance data isn't synced
+            # to reps), so skip the guard for them — see expense_add.
+            if is_manager(request.user) and amount > old_amount:
                 balance = calculate_company_balance(Currency.objects.get(code='SDG'))
                 if balance < (amount - old_amount):
                     form.add_error('amount', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية الزيادة في المصروف ({amount - old_amount}).")
                     return render(request, 'expenses/expense_form.html', {'form': form, "active_sidebar": "expenses", 'expense': expense})
-
 
             form.save()
             messages.success(request, "تم تعديل المصروف بنجاح.")

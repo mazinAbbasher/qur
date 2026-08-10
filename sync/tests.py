@@ -16,8 +16,8 @@ from django.utils.dateparse import parse_datetime
 
 from finance.models import Currency
 from panel.models import (
-    Client, Commission, Employee, Inventory, Invoice, InvoicePayment, Product,
-    Sale, SaleItem, Shipment, ReturnedProduct,
+    Client, Commission, Employee, Expense, Inventory, Invoice, InvoicePayment,
+    Product, Sale, SaleItem, Shipment, ReturnedProduct,
 )
 from sync.client import _clamped_cursor
 from sync.engine import apply_batch
@@ -137,6 +137,48 @@ class RolePolicyTests(SyncSetup):
         data = self.pull('tok-mgr').json()
         shipments = [r for r in data['changes'] if r['label'] == 'panel.Shipment']
         self.assertTrue(any('cost_usd' in s['fields'] for s in shipments))
+
+
+class ExpensePolicyTests(SyncSetup):
+    """Daily expenses: a rep authors and pushes their own, and the server/
+    manager receives them — but they are never sent back down to a salesperson,
+    so the company-wide expense total stays private on a rep laptop."""
+
+    def test_salesperson_can_push_expense(self):
+        uid = uuid.uuid4()
+        resp = self.push('tok-sales', [
+            row('panel.Expense', uid, description='Taxi', amount='500',
+                date='2026-08-10'),
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn('panel.Expense', resp.json()['rejected'])
+        self.assertEqual(resp.json()['applied'], 1)
+        exp = Expense.objects.get(sync_id=uid)
+        self.assertEqual(exp.description, 'Taxi')
+        self.assertEqual(exp.amount, Decimal('500'))
+
+    def test_manager_can_push_expense(self):
+        uid = uuid.uuid4()
+        resp = self.push('tok-mgr', [
+            row('panel.Expense', uid, description='Rent', amount='9000',
+                date='2026-08-01'),
+        ])
+        self.assertEqual(resp.json()['applied'], 1)
+        self.assertTrue(Expense.objects.filter(sync_id=uid).exists())
+
+    def test_pull_hides_expenses_from_salesperson(self):
+        Expense.objects.create(description='Rent', amount=Decimal('9000'),
+                               date=date(2026, 8, 1))
+        data = self.pull('tok-sales').json()
+        self.assertFalse([r for r in data['changes']
+                          if r['label'] == 'panel.Expense'])
+
+    def test_pull_sends_expenses_to_manager(self):
+        Expense.objects.create(description='Rent', amount=Decimal('9000'),
+                               date=date(2026, 8, 1))
+        data = self.pull('tok-mgr').json()
+        self.assertTrue([r for r in data['changes']
+                         if r['label'] == 'panel.Expense'])
 
 
 class ApplyEngineTests(SyncSetup):

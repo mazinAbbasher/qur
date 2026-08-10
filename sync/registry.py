@@ -51,7 +51,6 @@ _SPECS = [
              sensitive_fields=('cost_usd', 'cost_sdg', 'shipment_cost', 'supplier')),
     SyncSpec('panel.Inventory', 'reference', salesperson_readable=True, salesperson_writable=False),
     SyncSpec('panel.LostProduct', 'reference', salesperson_readable=True, salesperson_writable=True),
-    SyncSpec('panel.Expense', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('panel.Commission', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('panel.CommissionPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('panel.ManagerCommissionPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
@@ -72,6 +71,12 @@ _SPECS = [
     SyncSpec('panel.ReturnedProduct', 'transactional', salesperson_readable=False, salesperson_writable=True),
     SyncSpec('panel.Invoice', 'transactional', salesperson_readable=False, salesperson_writable=True),
     SyncSpec('panel.InvoicePayment', 'transactional', salesperson_readable=False, salesperson_writable=True),
+    # Expenses are authored on every node: a salesperson records the daily costs
+    # they incur in the field and pushes them up; the manager/server records its
+    # own and receives the reps'. Like Sale, a rep only PUSHES (readable=False),
+    # so the company-wide expense total is never exposed on a salesperson laptop.
+    # (No FKs, so its position in the apply order is irrelevant.)
+    SyncSpec('panel.Expense', 'transactional', salesperson_readable=False, salesperson_writable=True),
 ]
 
 # Public: labels in dependency order.

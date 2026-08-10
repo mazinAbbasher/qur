@@ -42,7 +42,9 @@ class AccessControlTests(TestCase):
                      'panel:product_list', 'panel:inventory_list',
                      'panel:shipment_list', 'panel:employee_list',
                      'panel:manager_list', 'panel:supplier_list',
-                     'panel:area_list', 'panel:lost_product_list']:
+                     'panel:area_list', 'panel:lost_product_list',
+                     # Reps log their own daily field expenses.
+                     'panel:expense_list', 'panel:expense_add']:
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 200, f"{name} should be allowed")
 
@@ -51,7 +53,7 @@ class AccessControlTests(TestCase):
         home = reverse('panel:sale_list')
         denied = [
             'panel:index', 'panel:net_profit_dashboard',
-            'panel:shipment_profit_report', 'panel:expense_list',
+            'panel:shipment_profit_report',
             'panel:sale_commissions',
             # view-only entities: create/edit blocked
             'panel:product_add',
