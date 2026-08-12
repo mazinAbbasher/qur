@@ -379,17 +379,18 @@ class Invoice(SyncModel):
         ('partial', 'Partial'),
     ]
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='unpaid')
-    number = models.CharField(max_length=6, unique=True, blank=True, null=True)  # <-- new field
+    number = models.CharField(max_length=7, unique=True, blank=True, null=True)  # <-- new field
 
     def save(self, *args, **kwargs):
         if not self.number:
-            # A 6-digit number whose leading digit is THIS node's SYNC_NODE_NUMBER,
-            # so invoices minted on different laptops occupy disjoint ranges and
-            # can never collide on the globally-unique `number` when they sync.
+            # A 7-digit number: THIS node's SYNC_NODE_NUMBER as the leading digit
+            # followed by 6 random digits, giving each node a disjoint pool of
+            # 1,000,000 numbers so invoices minted on different laptops can never
+            # collide on the globally-unique `number` when they sync.
             from django.conf import settings
             prefix = str(int(getattr(settings, 'SYNC_NODE_NUMBER', 0)) % 10)
             while True:
-                num = f"{prefix}{random.randint(0, 99999):05d}"
+                num = f"{prefix}{random.randint(0, 999999):06d}"
                 if not Invoice.objects.filter(number=num).exists():
                     self.number = num
                     break

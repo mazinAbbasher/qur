@@ -155,9 +155,9 @@ def get_latest_exchange_rate(to_currency):
 
     # fallback rates
     if to_currency == 'USD':
-        return 2550
+        return 6000
     elif to_currency == 'AED':
-        return 700
+        return 1300
     return 1
 
 

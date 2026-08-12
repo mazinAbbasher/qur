@@ -494,7 +494,7 @@ class InvoiceNumberTests(SyncSetup):
     def test_number_uses_node_prefix(self):
         sale = Sale.objects.create(total=Decimal('1000'))
         invoice = Invoice.objects.create(sale=sale, total=Decimal('1000'))
-        self.assertEqual(len(invoice.number), 6)
+        self.assertEqual(len(invoice.number), 7)
         self.assertTrue(invoice.number.startswith('3'))
 
     @override_settings(SYNC_NODE_NUMBER=7)
