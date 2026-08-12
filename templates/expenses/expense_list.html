@@ -67,7 +67,7 @@
               <td class="px-4 py-2">{{ expense.description|default:"—" }}</td>
               {% comment %} <td class="px-4 py-2">{{ expense.get_category_display|default:"—" }}</td> {% endcomment %}
               <td class="px-4 py-2">
-                <span class="text-dark fs-5">{{ expense.amount|intcomma|floatformat:0 }}</span>
+                <span class="text-dark fs-5">{{ expense.amount|floatformat:0|intcomma }}</span>
               </td>
               <td class="px-4 py-2">{{ expense.date|date:"Y-m-d" }}</td>
               <td class="px-4 py-2">
