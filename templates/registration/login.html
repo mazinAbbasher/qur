@@ -25,11 +25,25 @@
       border-radius: 8px; font-size: 15px; color: #212529; background: #fff;
     }
     input:focus { outline: none; border-color: #2b6cb0; box-shadow: 0 0 0 3px rgba(43,108,176,.15); }
-    button {
+    button[type=submit] {
       width: 100%; margin-top: 22px; padding: 12px; border: 0; border-radius: 8px;
       background: #2b6cb0; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer;
     }
-    button:hover { background: #245a94; }
+    button[type=submit]:hover { background: #245a94; }
+    .pw-wrap { position: relative; }
+    .pw-wrap input { padding-left: 44px; }
+    .pw-toggle {
+      position: absolute; left: 4px; top: 50%; transform: translateY(-50%);
+      width: 36px; height: 36px; padding: 0; border: 0; border-radius: 6px;
+      background: transparent; color: #7a8699; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pw-toggle:hover { color: #1f2733; }
+    .pw-toggle:focus-visible { outline: 2px solid #2b6cb0; outline-offset: 1px; }
+    .pw-toggle svg { width: 20px; height: 20px; }
+    .pw-toggle .icon-hide { display: none; }
+    .pw-toggle[aria-pressed=true] .icon-show { display: none; }
+    .pw-toggle[aria-pressed=true] .icon-hide { display: block; }
     .error { background: #fde8e8; color: #9b1c1c; padding: 10px 12px; border-radius: 8px; font-size: 13px; margin-top: 12px; }
   </style>
 </head>
@@ -47,10 +61,40 @@
     <input type="text" name="username" id="id_username" autofocus required>
 
     <label for="id_password">كلمة المرور</label>
-    <input type="password" name="password" id="id_password" required>
+    <div class="pw-wrap">
+      <input type="password" name="password" id="id_password" required>
+      <button type="button" class="pw-toggle" id="pw-toggle" aria-controls="id_password"
+              aria-pressed="false" aria-label="إظهار كلمة المرور" title="إظهار كلمة المرور">
+        <svg class="icon-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+        </svg>
+        <svg class="icon-hide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+          <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      </button>
+    </div>
 
     <input type="hidden" name="next" value="{{ next }}">
     <button type="submit">تسجيل الدخول</button>
   </form>
+  <script>
+    (function () {
+      var input = document.getElementById('id_password');
+      var toggle = document.getElementById('pw-toggle');
+      toggle.addEventListener('click', function () {
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        toggle.setAttribute('aria-pressed', show);
+        var label = show ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور';
+        toggle.setAttribute('aria-label', label);
+        toggle.title = label;
+        input.focus();
+      });
+      // Never submit (or let the browser remember) the field while it is unmasked.
+      toggle.form.addEventListener('submit', function () { input.type = 'password'; });
+    })();
+  </script>
 </body>
 </html>
