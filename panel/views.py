@@ -27,6 +27,7 @@ from finance.views import calculate_company_balance
 from panel.permissions import is_manager
 from panel import updater
 import os
+import re
 
 @register.filter
 def get_item(dictionary, key):
@@ -2163,10 +2164,14 @@ def invoice_pdf(request, pk):
         )
         output.seek(0)
         pdf = output.read()
+    # Put the client name in the filename so downloaded invoices are easy to find.
+    # Strip characters that aren't allowed in filenames on Windows/macOS/Linux.
+    client_name = invoice.sale.client.name if invoice.sale.client else 'no_client'
+    client_name = re.sub(r'[\\/:*?"<>|]+', '', client_name).strip().replace(' ', '_') or 'no_client'
     response = FileResponse(
         io.BytesIO(pdf),
         as_attachment=True,
-        filename=f'invoice_{invoice.pk}.pdf'
+        filename=f'{client_name}_invoice_{invoice.pk}.pdf'
     )
     return response
 
