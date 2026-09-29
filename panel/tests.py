@@ -167,3 +167,23 @@ class InvoicePaymentDeleteTests(TestCase):
     def test_get_not_allowed(self):
         self.client.force_login(self.manager)
         self.assertEqual(self.client.get(self.url).status_code, 405)
+
+    def test_mark_unpaid_redirects_to_its_own_invoice(self):
+        # Invoice and sale ids drift apart in real data (e.g. a sale saved
+        # without an invoice), so the redirect must use the invoice's own pk.
+        Sale.objects.create(total=10)                    # sale with no invoice
+        sale = Sale.objects.create(total=100)
+        invoice = Invoice.objects.create(sale=sale, total=100)
+        other = Invoice.objects.create(sale=Sale.objects.create(total=5), total=5)
+        InvoicePayment.objects.create(invoice=invoice, amount=40)
+        self.assertNotEqual(invoice.pk, sale.pk)
+
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('panel:invoice_mark_unpaid', args=[invoice.pk]))
+        self.assertRedirects(resp, reverse('panel:invoice_detail', args=[invoice.pk]))
+        self.assertFalse(invoice.payments.exists())
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'unpaid')
+        # The other customer's invoice is untouched by the redirect target.
+        self.assertTrue(InvoicePayment.objects.filter(invoice=self.invoice).exists())
+        self.assertEqual(Invoice.objects.get(pk=other.pk).status, 'unpaid')

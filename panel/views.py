@@ -2075,7 +2075,7 @@ def invoice_mark_unpaid(request, pk):
         invoice.refresh_from_db()  # Ensure we have the latest state after deletion
         invoice.update_status()
         messages.success(request, "تم تحديد الفاتورة كغير مدفوعة.")
-    return redirect('panel:invoice_detail', pk=invoice.sale.pk)
+    return redirect('panel:invoice_detail', pk=invoice.pk)
 
 @require_GET
 def invoice_pdf(request, pk):

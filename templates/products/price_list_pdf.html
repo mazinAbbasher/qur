@@ -1,0 +1,93 @@
+{% load humanize %}<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <title>قائمة الأسعار</title>
+    <style>
+        {% if font_url %}@font-face { font-family: 'Noto Kufi Arabic'; src: url('{{ font_url }}') format('woff2'); }{% endif %}
+        body { font-family: 'Noto Kufi Arabic', 'Cairo', 'Amiri', 'DejaVu Sans', Arial, sans-serif; color: #222; background: #fff; margin: 0; padding: 0; }
+        .container { max-width: 780px; margin: 0 auto; }
+        .my-header { padding: 0 24px 14px 24px; border-bottom: 2px solid #17a2b8; display: flex; align-items: center; justify-content: space-between; }
+        .company-logo { height: 64px; width: auto; object-fit: contain; }
+        .title-block { text-align: left; }
+        .title { font-size: 1.5em; font-weight: bold; margin: 0 0 2px 0; color: #17a2b8; }
+        .subtitle { font-size: 0.95em; color: #444; margin: 0; }
+        .date { font-size: 0.85em; color: #666; }
+        .client { margin: 16px 24px 0 24px; font-size: 1em; }
+        .client strong { color: #17a2b8; }
+        .table-container { margin: 16px 24px 0 24px; }
+        table { width: 100%; border-collapse: collapse; }
+        thead { display: table-header-group; }
+        tr { page-break-inside: avoid; }
+        th, td { padding: 7px 8px; text-align: right; border-bottom: 1px solid #e5e7eb; font-size: 0.88em; vertical-align: middle; }
+        th { background: #17a2b8; color: #fff; font-weight: bold; }
+        tbody tr:nth-child(even) td { background: #f5fafb; }
+        .num { width: 28px; text-align: center; }
+        td.num { color: #888; }
+        .name { font-weight: bold; }
+        .desc { font-size: 0.85em; color: #666; margin-top: 2px; }
+        .unavailable { display: inline-block; font-size: 0.78em; color: #b45309; background: #fef3c7; border-radius: 3px; padding: 0 5px; margin-top: 2px; }
+        .price { white-space: nowrap; text-align: left; }
+        td.price { font-weight: bold; }
+        .muted { color: #aaa; }
+        .notes { margin: 18px 24px 0 24px; font-size: 0.82em; color: #555; }
+        .notes div { margin-bottom: 2px; }
+        .footer { margin: 28px 24px 0 24px; font-size: 0.8em; color: #888; text-align: center; padding-top: 10px; border-top: 1px solid #ccc; }
+        @page { size: A4; margin: 24px 18px 30px 18px; @bottom-center { content: "صفحة " counter(page) " / " counter(pages); font-size: 0.75em; color: #888; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="my-header">
+            {% if logo_url %}<img src="{{ logo_url }}" class="company-logo" alt="Logo">{% endif %}
+            <div class="title-block">
+                <div class="title">قائمة الأسعار</div>
+                <div class="subtitle">Equatorial medical Ltd</div>
+                <div class="date">التاريخ: <span dir="ltr">{{ today|date:"Y-m-d" }}</span></div>
+            </div>
+        </div>
+
+        {% if client_name %}
+        <div class="client">مقدمة إلى: <strong>{{ client_name }}</strong></div>
+        {% endif %}
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="num">#</th>
+                        <th>المنتج</th>
+                        <th>الوحدة</th>
+                        {% if show_expiry %}<th>تاريخ الصلاحية</th>{% endif %}
+                        <th class="price">السعر (SDG)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for product in products %}
+                    <tr>
+                        <td class="num">{{ forloop.counter }}</td>
+                        <td>
+                            <div class="name">{{ product.name }}</div>
+                            {% if product.description %}<div class="desc">{{ product.description }}</div>{% endif %}
+                            {% if not product.in_stock %}<span class="unavailable">غير متوفر حالياً</span>{% endif %}
+                        </td>
+                        <td>{{ product.unit|default:"-" }}</td>
+                        {% if show_expiry %}<td>{% if product.sale_expiry %}{{ product.sale_expiry|date:"Y-m-d" }}{% else %}<span class="muted">-</span>{% endif %}</td>{% endif %}
+                        <td class="price">{% if product.sale_price %}{{ product.sale_price|floatformat:"-2"|intcomma }}{% else %}<span class="muted">عند الطلب</span>{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="notes">
+            <div>• جميع الأسعار بالجنيه السوداني (SDG).</div>
+            <div>• الأسعار سارية بتاريخ <span dir="ltr">{{ today|date:"Y-m-d" }}</span> وقابلة للتغيير دون إشعار مسبق.</div>
+        </div>
+
+        <div class="footer">
+            Equatorial medical Ltd &mdash; جميع الحقوق محفوظة &copy; {{ today|date:"Y" }}
+        </div>
+    </div>
+</body>
+</html>

@@ -17,6 +17,25 @@
               {% endfor %}
             </ul>
           {% endif %}
+          <!-- Price list: tick products below, then print them as a PDF for customers -->
+          <form id="price-list-form" method="get" action="{% url 'panel:product_price_list_pdf' %}" class="border rounded p-3 mb-3">
+            <div class="row g-2 align-items-center">
+              <div class="col-md-5">
+                <input type="text" name="client" maxlength="100" class="form-control" placeholder="اسم العميل (اختياري) - يظهر في قائمة الأسعار">
+              </div>
+              <div class="col-md-3">
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="checkbox" name="expiry" value="1" id="price-list-expiry" checked>
+                  <label class="form-check-label" for="price-list-expiry">إظهار تاريخ الصلاحية</label>
+                </div>
+              </div>
+              <div class="col-md-4 text-md-end">
+                <button type="submit" id="price-list-btn" class="btn btn-primary mb-0" disabled>
+                  <i class="bi bi-file-earmark-pdf"></i> طباعة قائمة الأسعار (<span id="selected-count">0</span>)
+                </button>
+              </div>
+            </div>
+          </form>
           <!-- Reactive search input -->
           <div class="mb-3">
             <input type="text" id="product-search" class="form-control" placeholder="ابحث عن منتج...">
@@ -25,11 +44,17 @@
             <table class="table align-middle" id="products-table">
               <thead>
                 <tr>
+                  <th style="width: 1%;">
+                    <div class="form-check mb-0">
+                      <input class="form-check-input" type="checkbox" id="select-all" title="تحديد الكل">
+                    </div>
+                  </th>
                   <th>المنتج</th>
                   {% comment %} <th>التصنيف</th> {% endcomment %}
                   <th>سعر الصرف</th>
                   {% comment %} <th>تاريخ الانتهاء</th> {% endcomment %}
                   <th>الوحدة</th>
+                  <th>سعر البيع (SDG)</th>
                   <th>إجراءات</th>
                 </tr>
               </thead>
@@ -37,11 +62,20 @@
                 {% for product in products %}
                 <tr>
                   <td>
+                    <div class="form-check mb-0">
+                      <input class="form-check-input product-check" type="checkbox" name="ids" value="{{ product.pk }}" form="price-list-form" aria-label="{{ product.name }}">
+                    </div>
+                  </td>
+                  <td>
                     <a href="{% url 'panel:product_detail' product.pk %}">{{ product.name }}</a>
                   </td>
                   {% comment %} <td>{{ product.get_category_display }}</td> {% endcomment %}
                   <td>{{ product.exchange_rate }}</td>
                   <td>{{ product.unit }}</td>
+                  <td>
+                    {% if product.sale_price %}{{ product.sale_price|floatformat:"-2"|intcomma }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    {% if not product.in_stock %}<span class="badge bg-secondary ms-1">غير متوفر</span>{% endif %}
+                  </td>
                   {% comment %} <td>{{ product.stock|intcomma }}</td> {% endcomment %}
                   {% comment %} <td>{{ product.stock }}</td> {% endcomment %}
                   {% comment %} <td>{{ product.expiry_date|date:"Y-m-d" }}</td> {% endcomment %}
@@ -58,11 +92,28 @@
               </tbody>
             </table>
           </div>
-          <!-- Reactive search script -->
+          <!-- Reactive search + price-list selection script -->
           <script>
             document.addEventListener('DOMContentLoaded', function() {
               const searchInput = document.getElementById('product-search');
               const table = document.getElementById('products-table');
+              const selectAll = document.getElementById('select-all');
+              const printBtn = document.getElementById('price-list-btn');
+              const countEl = document.getElementById('selected-count');
+              const checks = Array.from(table.querySelectorAll('.product-check'));
+              const isVisible = cb => cb.closest('tr').style.display !== 'none';
+
+              // Sync the counter, print button and "select all" state with the ticks.
+              function refresh() {
+                const selected = checks.filter(cb => cb.checked).length;
+                countEl.textContent = selected;
+                printBtn.disabled = selected === 0;
+                const shown = checks.filter(isVisible);
+                const shownSelected = shown.filter(cb => cb.checked).length;
+                selectAll.checked = shown.length > 0 && shownSelected === shown.length;
+                selectAll.indeterminate = shownSelected > 0 && shownSelected < shown.length;
+              }
+
               searchInput.addEventListener('input', function() {
                 const filter = this.value.trim().toLowerCase();
                 const rows = table.querySelectorAll('tbody tr');
@@ -76,7 +127,18 @@
                     row.style.display = 'none';
                   }
                 });
+                refresh();
               });
+
+              // "Select all" only affects rows matching the current search.
+              selectAll.addEventListener('change', function() {
+                checks.filter(isVisible).forEach(cb => { cb.checked = selectAll.checked; });
+                refresh();
+              });
+              checks.forEach(cb => cb.addEventListener('change', refresh));
+              // Browsers restore ticks on back/forward navigation.
+              window.addEventListener('pageshow', refresh);
+              refresh();
             });
           </script>
         </div>
