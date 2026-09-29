@@ -92,3 +92,8 @@ class InvoicePdfTests(TestCase):
         self.assertNotIn('Subtotal', html)
         self.assertNotIn('You saved', html)
         self.assertIn('1,900.00 SDG', html)
+
+    def test_bankak_account_details(self):
+        _, html = self._render(self._invoice(('950', 2, '0', '0')))
+        self.assertIn('Equatorial Medical Company', html)
+        self.assertIn('4049949', html)
