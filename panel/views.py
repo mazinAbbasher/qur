@@ -115,22 +115,59 @@ def index(request):
     })
 
 # Product Menu Views
+def _attach_sale_prices(products):
+    """Set ``sale_price``, ``sale_expiry`` and ``in_stock`` on each product.
+
+    The price is the one a sale made today would use: the newest batch that is
+    still in stock and not expired. A product with nothing sellable falls back
+    to its latest shipment's price with ``in_stock = False``; a product never
+    shipped (or shipped without a sale price) gets ``sale_price = None``.
+    """
+    products = list(products)
+    ids = [p.pk for p in products]
+
+    sellable = {}
+    for inv in (Inventory.objects
+                .filter(product_id__in=ids, quantity__gt=0,
+                        shipment__expiry_date__gte=date.today())
+                .select_related('shipment__product')
+                .order_by('-shipment__received_at', '-shipment__pk')):
+        sellable.setdefault(inv.product_id, inv.shipment)
+
+    latest = {}
+    missing = [pk for pk in ids if pk not in sellable]
+    if missing:
+        for shipment in (Shipment.objects
+                         .filter(product_id__in=missing)
+                         .select_related('product')
+                         .order_by('-received_at', '-pk')):
+            latest.setdefault(shipment.product_id, shipment)
+
+    for product in products:
+        shipment = sellable.get(product.pk)
+        product.in_stock = shipment is not None
+        product.sale_expiry = shipment.expiry_date if shipment else None
+        shipment = shipment or latest.get(product.pk)
+        product.sale_price = (shipment.sale_price_sdg or None) if shipment else None
+    return products
+
+
 def product_list(request):
     """
     List products with optional search/filter.
+
+    Not paginated: search is client-side and products are ticked here for the
+    price-list PDF, so every product has to be on the page.
     """
-    products = Product.objects.all()
+    products = Product.objects.order_by('name')
     search = request.GET.get('search')
     category = request.GET.get('category')
     if search:
         products = products.filter(name__icontains=search)
     if category:
         products = products.filter(category=category)
-    paginator = Paginator(products, 20)
-    page_number = request.GET.get('page')
-    page_obj = paginator.get_page(page_number)
     return render(request, 'products/product_list.html', {
-        'products': page_obj,
+        'products': _attach_sale_prices(products),
         'category_choices': Product.CATEGORY_CHOICES,
         'search': search,
         'selected_category': category,
@@ -438,6 +475,47 @@ def product_stock_movement_pdf(request, pk):
         io.BytesIO(pdf),
         as_attachment=True,
         filename=f'stock_movement_{product.pk}_{date.today().isoformat()}.pdf'
+    )
+
+
+@require_GET
+def product_price_list_pdf(request):
+    """Customer price list PDF for the products ticked on the product list.
+
+    Deliberately open to salespeople as well as managers: it shows sale prices
+    only (which reps already see), never costs.
+    """
+    from pathlib import Path
+    from django.contrib.staticfiles import finders
+    from django.template.loader import render_to_string
+    from weasyprint import HTML
+
+    ids = [i for i in request.GET.getlist('ids') if i.isdigit()]
+    products = Product.objects.filter(pk__in=ids).order_by('name')
+    if not products:
+        messages.error(request, "اختر منتجاً واحداً على الأقل لطباعة قائمة الأسعار.")
+        return redirect('panel:product_list')
+
+    def static_uri(name):
+        # Read assets straight from disk instead of fetching them back over HTTP.
+        path = finders.find(name)
+        return Path(path).as_uri() if path else ''
+
+    html_string = render_to_string('products/price_list_pdf.html', {
+        'products': _attach_sale_prices(products),
+        'client_name': request.GET.get('client', '').strip()[:100],
+        'show_expiry': request.GET.get('expiry') == '1',
+        'today': date.today(),
+        'logo_url': static_uri('logo.png'),
+        # Noto Kufi Arabic (same file oh.css uses), so the PDF looks the same on
+        # every machine regardless of which Arabic fonts are installed.
+        'font_url': static_uri('CSRp4ydQnPyaDxEXLFF6LZVLKrodhu8t57o1kDc5Wh5v37bNlrWWfw.woff2'),
+    })
+    pdf = HTML(string=html_string, base_url=request.build_absolute_uri('/')).write_pdf()
+    return FileResponse(
+        io.BytesIO(pdf),
+        as_attachment=True,
+        filename=f'price_list_{date.today().isoformat()}.pdf'
     )
 
 
@@ -1965,6 +2043,17 @@ def invoice_add_payment(request, pk):
     else:
         for error in form.errors.values():
             messages.error(request, error)
+    return redirect('panel:sale_detail', pk=invoice.sale.pk)
+
+@require_POST
+def invoice_delete_payment(request, pk, payment_pk):
+    # Undo a payment recorded by mistake. The InvoicePayment post_delete signal
+    # re-derives the invoice status, and sync pushes the delete as a tombstone.
+    invoice = get_object_or_404(Invoice, pk=pk)
+    payment = get_object_or_404(InvoicePayment, pk=payment_pk, invoice=invoice)
+    amount = payment.amount
+    payment.delete()
+    messages.success(request, f"تم حذف الدفعة بمبلغ {amount}.")
     return redirect('panel:sale_detail', pk=invoice.sale.pk)
 
 @require_POST

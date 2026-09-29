@@ -9,7 +9,7 @@ from django.contrib.auth.models import Group
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from panel.models import Product
+from panel.models import Invoice, InvoicePayment, Product, Sale
 from panel.permissions import MANAGER_GROUP, SALESPERSON_GROUP
 
 
@@ -102,3 +102,68 @@ class AccessControlTests(TestCase):
 
         self.client.force_login(self.manager)
         self.assertIn('تكلفة', self.client.get(url).content.decode())
+
+
+@override_settings(SYNC_ROLE='server')
+class InvoicePaymentDeleteTests(TestCase):
+    """A payment recorded by mistake can be removed, unblocking sale delete."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.manager = User.objects.create_user('boss', password='pw12345!x')
+        cls.manager.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        cls.rep = User.objects.create_user('rep', password='pw12345!x')
+        cls.rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+
+    def setUp(self):
+        self.sale = Sale.objects.create(total=100)
+        self.invoice = Invoice.objects.create(sale=self.sale, total=100)
+        self.payment = InvoicePayment.objects.create(invoice=self.invoice, amount=40)
+        self.url = reverse('panel:invoice_delete_payment',
+                           args=[self.invoice.pk, self.payment.pk])
+
+    def test_manager_deletes_payment_and_status_resets(self):
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'partial')
+
+        self.client.force_login(self.manager)
+        resp = self.client.post(self.url)
+        self.assertRedirects(resp, reverse('panel:sale_detail', args=[self.sale.pk]),
+                             fetch_redirect_response=False)
+        self.assertFalse(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'unpaid')
+
+        # With the payment gone the sale (and its invoice) can be deleted.
+        self.client.post(reverse('panel:sale_delete', args=[self.sale.pk]))
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertFalse(Invoice.objects.filter(pk=self.invoice.pk).exists())
+
+    def test_salesperson_cannot_delete_payment(self):
+        self.client.force_login(self.rep)
+        resp = self.client.post(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp['Location'], reverse('panel:sale_list'))
+        self.assertTrue(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+
+    def test_payment_must_belong_to_invoice(self):
+        other = Invoice.objects.create(sale=Sale.objects.create(total=50), total=50)
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('panel:invoice_delete_payment',
+                                        args=[other.pk, self.payment.pk]))
+        self.assertEqual(resp.status_code, 404)
+        self.assertTrue(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+
+    def test_delete_button_shown_to_manager_only(self):
+        for name in ('panel:sale_detail', 'panel:invoice_detail'):
+            pk = self.sale.pk if name == 'panel:sale_detail' else self.invoice.pk
+            page = reverse(name, args=[pk])
+            self.client.force_login(self.manager)
+            self.assertContains(self.client.get(page), self.url)
+            self.client.force_login(self.rep)
+            self.assertNotContains(self.client.get(page), self.url)
+
+    def test_get_not_allowed(self):
+        self.client.force_login(self.manager)
+        self.assertEqual(self.client.get(self.url).status_code, 405)

@@ -7,6 +7,7 @@ urlpatterns = [
     # Product URLs
     path('products/', views.product_list, name='product_list'),
     path('products/add/', views.product_add, name='product_add'),
+    path('products/price-list/pdf/', views.product_price_list_pdf, name='product_price_list_pdf'),
     path('products/<int:pk>/edit/', views.product_edit, name='product_edit'),
     path('products/<int:pk>/delete/', views.product_delete, name='product_delete'),
     path('products/<int:pk>/stock-movement/', views.product_stock_movement, name='product_stock_movement'),
@@ -90,6 +91,7 @@ urlpatterns = [
     path('invoices/<int:pk>/mark_unpaid/', views.invoice_mark_unpaid, name='invoice_mark_unpaid'),
     path('invoices/<int:pk>/pdf/', views.invoice_pdf, name='invoice_pdf'),
     path('invoices/<int:pk>/add_payment/', views.invoice_add_payment, name='invoice_add_payment'),
+    path('invoices/<int:pk>/payments/<int:payment_pk>/delete/', views.invoice_delete_payment, name='invoice_delete_payment'),
 
     path('debts/', views.debts_view, name='debts'),
 

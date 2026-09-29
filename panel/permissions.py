@@ -101,6 +101,8 @@ MANAGER_ONLY_VIEWS = {
     'panel:manager_add', 'panel:manager_edit', 'panel:manager_delete',
     'panel:supplier_add', 'panel:supplier_edit', 'panel:supplier_delete',
     'panel:supplier_add_payment',
+    # Removing a recorded customer payment rewrites what was collected.
+    'panel:invoice_delete_payment',
 }
 
 # Whole URL trees that are manager-only (the finance app: balances, partners,

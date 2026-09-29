@@ -187,6 +187,7 @@
                   <th>التاريخ</th>
                   <th>المبلغ</th>
                   <th>ملاحظة</th>
+                  {% if is_manager %}<th></th>{% endif %}
                 </tr>
               </thead>
               <tbody>
@@ -195,6 +196,17 @@
                   <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
                   <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
                   <td>{{ p.note|default:"-" }}</td>
+                  {% if is_manager %}
+                  <td class="text-center">
+                    <form method="post" action="{% url 'panel:invoice_delete_payment' invoice.pk p.pk %}"
+                      onsubmit="return confirm('حذف هذه الدفعة؟');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-danger" title="حذف الدفعة">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </form>
+                  </td>
+                  {% endif %}
                 </tr>
                 {% endfor %}
               </tbody>
