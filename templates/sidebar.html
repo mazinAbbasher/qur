@@ -150,5 +150,15 @@
         <span class="nav-link-text ms-1 m-1">مزامنة البيانات</span>
       </a>
     </li>
+
+    {# ---- System update (all roles) ---- #}
+    <li class="nav-item">
+      <a class="nav-link text-white nav-link {% if active == 'system_update' %}active bg-gradient-info{% endif %}" href="{% url 'panel:system_update' %}">
+        <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
+          <i class="material-icons opacity-10"><img src="{% static "assets/img/device.svg"%}"></i>
+        </div>
+        <span class="nav-link-text ms-1 m-1">تحديث النظام</span>
+      </a>
+    </li>
   </ul>
 </div>

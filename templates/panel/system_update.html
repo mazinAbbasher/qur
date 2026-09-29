@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-10">
+
+      <div class="card shadow mb-4">
+        <div class="card-header bg-gradient-dark text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0 text-white">تحديث النظام</h5>
+          {% if version %}
+            <span class="badge bg-light text-dark" title="{{ version.subject }}">الإصدار {{ version.commit }} — {{ version.date }}</span>
+          {% endif %}
+        </div>
+        <div class="card-body">
+
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+
+          {% if not allowed %}
+            <div class="alert alert-warning">
+              هذا هو الخادم الرئيسي؛ يتم تحديثه من سطر الأوامر:
+              <code>python manage.py update_system</code> ثم إعادة تشغيل gunicorn.
+            </div>
+          {% endif %}
+
+          <div id="update-running" class="alert alert-info {% if not status.running %}d-none{% endif %}">
+            <strong>جارٍ التحديث…</strong> <span id="update-step">{{ status.step }}</span><br>
+            <span class="small">لا تغلق البرنامج. قد لا تستجيب الصفحات لبضع ثوانٍ أثناء إعادة التشغيل.</span>
+          </div>
+
+          {% if not status.running and status.message %}
+            <div class="alert {% if status.state == 'failed' %}alert-danger{% elif status.state == 'done' %}alert-success{% else %}alert-light border{% endif %}">
+              {{ status.message }}
+              {% if status.finished_display %}<span class="small text-muted ms-2">({{ status.finished_display }})</span>{% endif %}
+            </div>
+          {% endif %}
+
+          <form method="post" action="{% url 'panel:system_update_start' %}"
+                onsubmit="return confirm('سيتم تنزيل آخر إصدار من البرنامج وتثبيته. احفظ أي عمل مفتوح أولاً. متابعة؟');">
+            {% csrf_token %}
+            <button type="submit" class="btn bg-gradient-info text-white px-4"
+                    {% if not allowed or status.running %}disabled{% endif %}>
+              <i class="bi bi-cloud-download"></i> تحديث النظام
+            </button>
+            <span class="text-muted small ms-2">
+              ينزّل آخر إصدار من GitHub ويثبته. إذا فشل أي خطوة يعود البرنامج تلقائياً إلى الإصدار الحالي.
+            </span>
+          </form>
+
+        </div>
+      </div>
+
+      <div class="card shadow {% if not log %}d-none{% endif %}" id="update-log-card">
+        <div class="card-header bg-light"><h6 class="mb-0">سجل آخر تحديث</h6></div>
+        <div class="card-body">
+          <pre id="update-log" dir="ltr" class="small mb-0 p-2 bg-light rounded" style="max-height: 400px; overflow: auto; white-space: pre-wrap;">{{ log }}</pre>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{% if status.running %}
+<script>
+  (function () {
+    var url = "{% url 'panel:system_update_status' %}";
+    var failures = 0;
+    var logBox = document.getElementById('update-log');
+    logBox.scrollTop = logBox.scrollHeight;
+
+    function get(onData, onError) {
+      fetch(url, {credentials: 'same-origin', cache: 'no-store'})
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(onData, onError);
+    }
+
+    // The app restarts at the end; reload only once it answers again.
+    function reloadWhenBack() {
+      get(function () { location.reload(); },
+          function () { setTimeout(reloadWhenBack, 2000); });
+    }
+
+    function poll() {
+      get(function (d) {
+        failures = 0;
+        document.getElementById('update-step').textContent = d.step || '';
+        document.getElementById('update-log-card').classList.remove('d-none');
+        logBox.textContent = d.log;
+        logBox.scrollTop = logBox.scrollHeight;
+        if (d.running) setTimeout(poll, 2000);
+        else setTimeout(reloadWhenBack, 4000);
+      }, function () {
+        // Expected while the app restarts. Give up polling after ~2 minutes.
+        if (++failures < 60) setTimeout(poll, 2000); else location.reload();
+      });
+    }
+    setTimeout(poll, 1500);
+  })();
+</script>
+{% endif %}
+{% endblock %}

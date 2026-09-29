@@ -266,15 +266,44 @@ On the manager laptop: `/admin/panel/client/` → **استيراد من CSV** (I
 sync to send the new clients to the server.
 
 ### Update the software
-**Update the server first**, then each laptop.
+Push the new code to `main` on GitHub (with its migrations committed). Then
+**update the server first**, then the laptops.
 
-On each laptop, **sync first** so nothing is waiting to upload. Then:
+**Server** (over SSH):
 ```bash
-git pull
-pip install -r requirements.txt
-python manage.py migrate
+./venv/bin/python manage.py update_system
 ```
-On the server, also run `collectstatic --noinput` and restart gunicorn.
+then restart gunicorn.
+
+**Laptops:** the user opens **تحديث النظام** in the sidebar and clicks the
+button. No visit needed. It runs in the background and:
+
+1. refuses to start if program files were edited on that laptop (deleted
+   sample DBs are fine);
+2. downloads the new version and uploads any pending sync data first;
+3. installs `requirements.txt` if it changed;
+4. switches to the new code and checks it (`check`, and that no migrations
+   are missing);
+5. backs up `db.sqlite3` (last 5 kept as `db.sqlite3.bak-preupdate-*`) and
+   runs `migrate`;
+6. restarts the app (only if it runs with `runserver`'s auto-reload, as in
+   step 7; otherwise the user is told to restart it).
+
+If step 3, 4 or 5 fails, the database backup is restored and the laptop goes
+back to the previous version. The page shows the reason and the full log.
+Ask the user for a screenshot. If a laptop was switched off mid-update,
+clicking the button again finishes the job.
+
+* A bad release that passed the checks: push a fix (or `git revert`) and have
+  users click the button again. **Never force-push `main`**: laptops refuse to
+  update when their history doesn't match GitHub.
+* The same thing from a terminal on a laptop: `python manage.py update_system`.
+* Laptops installed before this button existed need one last manual update:
+  ```bash
+  git pull
+  pip install -r requirements.txt
+  python manage.py migrate
+  ```
 
 ### Backups
 * Server: daily `pg_dump equatorial > backup-$(date +%F).sql`. This is the main

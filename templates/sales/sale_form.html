@@ -12,6 +12,14 @@
           </h5>
         </div>
         <div class="card-body">
+          {% if messages %}
+          {# Not class="alert": base.html fades those out, and these must stay readable. #}
+          <div class="mb-3" role="alert">
+            {% for message in messages %}
+            <div class="p-3 mb-2 rounded text-white {% if message.level_tag == 'error' %}bg-danger{% elif message.level_tag == 'success' %}bg-success{% else %}bg-info{% endif %}">{{ message }}</div>
+            {% endfor %}
+          </div>
+          {% endif %}
           <form method="post" id="sale-form" autocomplete="off">
             {% csrf_token %}
             <div class="row mb-3">
@@ -346,7 +354,8 @@
         "product": "{{ inv.product.name|escapejs }}",
         "batch": "{{ inv.shipment.batch_number|escapejs }}",
         "expiry": "{{ inv.shipment.expiry_date }}",
-        "quantity": "{{ inv.quantity }}"
+        {# Stock this sale may use: on edit it includes what the sale already holds. #}
+        "quantity": "{{ inv.available|default:inv.quantity }}"
       }{% if not forloop.last %},{% endif %}
     {% endfor %}
   };
@@ -385,7 +394,12 @@
   function updatePrice(row, productId, batchId) {
     const priceInput = row.querySelector('input[name$="price"]');
     let price = 0;
-    if (batchId && batchShipmentSaleSDG[batchId] !== undefined) {
+    // A saved row on its original batch keeps the price it was sold at (the
+    // server does the same); any other batch shows that batch's current price.
+    const soldPrice = row.dataset.origBatch === String(batchId) ? parseFloat(row.dataset.origPrice) : NaN;
+    if (!isNaN(soldPrice)) {
+      price = soldPrice;
+    } else if (batchId && batchShipmentSaleSDG[batchId] !== undefined) {
       price = parseFloat(batchShipmentSaleSDG[batchId]);
     }
     if (priceInput) {
@@ -450,6 +464,13 @@
     };
     // Set price on load
     let batchId = batchSelect.value;
+    // Remember a saved row's batch and sold price (see updatePrice).
+    const idInput = row.querySelector('input[name$="-id"]');
+    const loadedPrice = row.querySelector('input[name$="price"]');
+    if (idInput && idInput.value && loadedPrice && batchId) {
+      row.dataset.origBatch = String(batchId);
+      row.dataset.origPrice = loadedPrice.value;
+    }
     updatePrice(row, productSelect.value, batchId);
     // Set max quantity on load
     if (qtyInput && batchId && inventoryData[batchId]) {
@@ -601,6 +622,7 @@
     
     // Validate sale items
     let hasItem = false;
+    let batchUse = {};  // batch id -> { total units, row numbers }
     document.querySelectorAll('.saleitem-row').forEach(function(row, idx) {
       // Skip deleted rows
       let delInput = row.querySelector('input[type="checkbox"][name$="DELETE"]');
@@ -635,6 +657,10 @@
         if (totalQty > invQty) {
           errors.push('إجمالي الكمية (الكمية + البضاعة المجانية) يتجاوز المتاح في المخزون للصف رقم ' + (idx+1) + '. أقصى كمية متاحة: ' + invQty);
         }
+        // Rows on the same batch share its stock; summed after the loop.
+        batchUse[batch.value] = batchUse[batch.value] || { total: 0, rows: [] };
+        batchUse[batch.value].total += totalQty;
+        batchUse[batch.value].rows.push(idx + 1);
       }
       // Price (no longer editable, but still check)
       let price = row.querySelector('input[name$="price"]');
@@ -645,6 +671,14 @@
       let priceDiscount = row.querySelector('input[name$="price_discount"]');
       if (!priceDiscount || priceDiscount.value === '' || isNaN(priceDiscount.value) || Number(priceDiscount.value) < 0 || Number(priceDiscount.value) > 100) {
         errors.push('يرجى إدخال خصم سعر صحيح في الصف رقم ' + (idx+1));
+      }
+    });
+    Object.keys(batchUse).forEach(function(batchId) {
+      let use = batchUse[batchId];
+      let invQty = Number(inventoryData[batchId].quantity);
+      // A single row over the limit was already reported above.
+      if (use.rows.length > 1 && use.total > invQty) {
+        errors.push('إجمالي الكمية من الدفعة ' + inventoryData[batchId].batch + ' في الصفوف ' + use.rows.join('، ') + ' (' + use.total + ') يتجاوز المتاح في المخزون. أقصى كمية متاحة: ' + invQty);
       }
     });
     if (!hasItem) {

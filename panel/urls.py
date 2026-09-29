@@ -112,4 +112,9 @@ urlpatterns = [
     path('managers/<int:pk>/', views.manager_detail, name='manager_detail'),
     path("manager_commission_pay/<int:manager_id>/", views.manager_commission_pay, name="manager_commission_pay"),  
 
+    # System update (git pull + requirements + migrate, run in the background)
+    path('system/update/', views.system_update, name='system_update'),
+    path('system/update/start/', views.system_update_start, name='system_update_start'),
+    path('system/update/status/', views.system_update_status, name='system_update_status'),
+
 ]

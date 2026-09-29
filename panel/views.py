@@ -25,6 +25,8 @@ from calendar import monthrange
 from finance.models import CurrencyExchange, Currency, get_latest_exchange_rate
 from finance.views import calculate_company_balance
 from panel.permissions import is_manager
+from panel import updater
+import os
 
 @register.filter
 def get_item(dictionary, key):
@@ -726,12 +728,62 @@ class SaleForm(forms.ModelForm):
         today_str = date.today().isoformat()
         self.fields['due_date'].widget.attrs['min'] = today_str
 
+class _SaleFormError(Exception):
+    """Aborts a sale create/edit transaction; each arg is a message for the user."""
+
+
+def _sale_stock_usage(sale):
+    """Units each batch has given up for ``sale``, read from the saved rows.
+
+    Per inventory pk: sold + free - returned, the same formula the sync server
+    uses to recompute stock (sync.engine._recompute_inventory).
+    """
+    usage = defaultdict(int)
+    for item in sale.items.all():
+        returned = sum(r.quantity for r in item.returns.all())
+        usage[item.inventory_id] += item.quantity + item.free_units - returned
+    return usage
+
+
+def _move_sale_stock(old_usage, new_usage):
+    """Shift each batch's stock by (new - old) usage, refusing any oversell.
+
+    Must run inside the sale's transaction. Each batch is read once, locked,
+    and saved once, so several rows on the same batch add up instead of
+    overwriting each other. Raises _SaleFormError (nothing written) if a batch
+    is short.
+    """
+    pks = sorted(set(old_usage) | set(new_usage))
+    # Locking in pk order keeps concurrent sales from deadlocking (PostgreSQL;
+    # SQLite already serialises writers).
+    locked = {inv.pk: inv for inv in
+              Inventory.objects.select_for_update().filter(pk__in=pks).order_by('pk')}
+    shortfalls = []
+    for pk in pks:
+        inv = locked[pk]
+        delta = new_usage.get(pk, 0) - old_usage.get(pk, 0)
+        if delta > inv.quantity:
+            shortfalls.append(
+                f"الكمية المطلوبة (مع المجاني) {new_usage[pk]} غير متوفرة في الدفعة "
+                f"{inv.shipment.batch_number} للمنتج {inv.product.name}. "
+                f"المتاح: {inv.quantity + old_usage.get(pk, 0)}"
+            )
+    if shortfalls:
+        raise _SaleFormError(*shortfalls)
+    for pk in pks:
+        delta = new_usage.get(pk, 0) - old_usage.get(pk, 0)
+        if delta:
+            locked[pk].quantity -= delta
+            locked[pk].save()
+
+
 def sale_create(request):
     latest_rate = ExchangeRate.objects.order_by('-updated_at').first()
     products = Product.objects.all()
     inventories = Inventory.objects.filter(quantity__gt=0).select_related('product', 'shipment')
     inventories_by_product = defaultdict(list)
     for inv in inventories:
+        inv.available = inv.quantity  # stock this sale may use (sale_form.html limits)
         inventories_by_product[inv.product.pk].append(inv)
     products_with_batches = [p for p in products if inventories_by_product.get(p.pk)]
     if request.method == 'POST':
@@ -771,103 +823,78 @@ def sale_create(request):
                 post_data[f'{prefix}-price'] = "0"
         formset = SaleItemFormSet(post_data)
         if sale_form.is_valid() and formset.is_valid():
-            sale = sale_form.save(commit=False)
-            sale.created_at = timezone.now()
-            sale.save()
-            formset.instance = sale
-            sale_items = formset.save(commit=False)
-            total = 0
-            for i, form in enumerate(formset.forms):
-                if form.cleaned_data.get('DELETE', False):
-                    continue
-                prefix = form.prefix
-                batch_key = f"{prefix}-batch"
-                batch_id = request.POST.get(batch_key)
-                if not batch_id:
-                    messages.error(request, "يجب اختيار دفعة لكل منتج.")
-                    return render(request, 'sales/sale_form.html', {
-                        'sale_form': sale_form,
-                        'formset': formset,
-                        'latest_rate': latest_rate,
-                        'products': products,
-                        'inventories': inventories,
-                        'products_with_batches': products_with_batches,
-                        'inventories_by_product': inventories_by_product,
-                        'sale': None,
-                        "active_sidebar": "sales"
-                    })
-                try:
-                    inventory = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
-                except Inventory.DoesNotExist:
-                    messages.error(request, "دفعة غير صالحة.")
-                    return render(request, 'sales/sale_form.html', {
-                        'sale_form': sale_form,
-                        'formset': formset,
-                        'latest_rate': latest_rate,
-                        'products': products,
-                        'inventories': inventories,
-                        'products_with_batches': products_with_batches,
-                        'inventories_by_product': inventories_by_product,
-                        'sale': None,
-                        "active_sidebar": "sales"
-                    })
-                form.instance.inventory = inventory
-                # Set price from the shipment's SDG sale price (enforce backend)
-                shipment = inventory.shipment
-                product = inventory.product
-                if shipment:
-                    form.instance.price = float(shipment.sale_price_sdg or 0)
-                else:
-                    form.instance.price = 0
-                # --- Set discounts from form data ---
-                form.instance.free_goods_discount = float(form.cleaned_data.get('free_goods_discount') or 0)
-                form.instance.price_discount = float(form.cleaned_data.get('price_discount') or 0)
-            for obj in formset.deleted_objects:
-                obj.delete()
-            for item in sale_items:
-                # Deduct both paid and free units from inventory
-                total_units = item.quantity + item.free_units
-                # if total_units > item.inventory.quantity:
-                #     messages.error(request, f"الكمية المطلوبة (مع المجاني) غير متوفرة في الدفعة {item.inventory.shipment.batch_number} للمنتج {item.inventory.product.name}")
-                #     return render(request, 'sales/sale_form.html', {
-                #         'sale_form': sale_form,
-                #         'formset': formset,
-                #         'latest_rate': latest_rate,
-                #         'products': products,
-                #         'inventories': inventories,
-                #         'products_with_batches': products_with_batches,
-                #         'inventories_by_product': inventories_by_product,
-                #         'sale': None,
-                #         "active_sidebar": "sales"
-                #     })
-                item.inventory.quantity -= total_units
-                item.inventory.save()
-                item.save()
-                total += item.get_total
-            sale.total = total
-            sale.save()
-            formset.save_m2m()
-            sale.calculate_total()
-            # --- Commission creation ---
-            employee = sale.employee
-            if employee and getattr(employee, 'commission_percentage', 0):
-                commission_percentage = float(employee.commission_percentage)
-                commission_amount = float(sale.total or 0) * (commission_percentage / 100)
-                Commission.objects.update_or_create(
-                    employee=employee, sale=sale,
-                    defaults={'amount': commission_amount}
-                )
-            # --- End commission creation ---
-            invoice = Invoice.objects.create(
-                sale=sale,
-                created_at=timezone.now(),
-                file_path='',
-            )
-            invoice.total = sale.total
-            invoice.due_date = sale_form.cleaned_data['due_date']
-            invoice.status = 'unpaid'
-            invoice.save()
-            return redirect('panel:sale_detail', pk=sale.pk)
+            from django.db import transaction
+            # All-or-nothing: a failure part-way (a bad batch, a stock shortage,
+            # or an unexpected error) must not leave a sale without an invoice,
+            # or stock deducted for its earlier items.
+            try:
+                with transaction.atomic():
+                    sale = sale_form.save(commit=False)
+                    sale.created_at = timezone.now()
+                    sale.save()
+                    formset.instance = sale
+                    sale_items = formset.save(commit=False)
+                    total = 0
+                    for i, form in enumerate(formset.forms):
+                        if form.cleaned_data.get('DELETE', False):
+                            continue
+                        prefix = form.prefix
+                        batch_key = f"{prefix}-batch"
+                        batch_id = request.POST.get(batch_key)
+                        if not batch_id:
+                            raise _SaleFormError("يجب اختيار دفعة لكل منتج.")
+                        try:
+                            inventory = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
+                        except Inventory.DoesNotExist:
+                            raise _SaleFormError("دفعة غير صالحة.")
+                        form.instance.inventory = inventory
+                        # Set price from the shipment's SDG sale price (enforce backend)
+                        shipment = inventory.shipment
+                        product = inventory.product
+                        if shipment:
+                            form.instance.price = float(shipment.sale_price_sdg or 0)
+                        else:
+                            form.instance.price = 0
+                        # --- Set discounts from form data ---
+                        form.instance.free_goods_discount = float(form.cleaned_data.get('free_goods_discount') or 0)
+                        form.instance.price_discount = float(form.cleaned_data.get('price_discount') or 0)
+                    for obj in formset.deleted_objects:
+                        obj.delete()
+                    for item in sale_items:
+                        item.save()
+                        total += item.get_total
+                    # Deduct paid + free units per batch; refuses an oversell,
+                    # including one split across rows on the same batch.
+                    _move_sale_stock({}, _sale_stock_usage(sale))
+                    sale.total = total
+                    sale.save()
+                    formset.save_m2m()
+                    sale.calculate_total()
+                    # --- Commission creation ---
+                    employee = sale.employee
+                    if employee and getattr(employee, 'commission_percentage', 0):
+                        commission_percentage = float(employee.commission_percentage)
+                        commission_amount = float(sale.total or 0) * (commission_percentage / 100)
+                        Commission.objects.update_or_create(
+                            employee=employee, sale=sale,
+                            defaults={'amount': commission_amount}
+                        )
+                    # --- End commission creation ---
+                    invoice = Invoice.objects.create(
+                        sale=sale,
+                        created_at=timezone.now(),
+                        file_path='',
+                    )
+                    invoice.total = sale.total
+                    invoice.due_date = sale_form.cleaned_data['due_date']
+                    invoice.status = 'unpaid'
+                    invoice.save()
+            except _SaleFormError as e:
+                # Already rolled back; fall through to re-render the form.
+                for msg in e.args:
+                    messages.error(request, msg)
+            else:
+                return redirect('panel:sale_detail', pk=sale.pk)
         else:
             # --- Add this block to print form errors for debugging ---
             print("SaleForm errors:", sale_form.errors)
@@ -970,7 +997,11 @@ def sale_edit(request, pk):
     inventories = Inventory.objects.filter(models.Q(quantity__gt=0) | models.Q(saleitem__sale=sale)).select_related('product', 'shipment').distinct()
 
     inventories_by_product = defaultdict(list)
+    # Stock this sale may use per batch: what is left plus what it already holds,
+    # so the form's limits don't block keeping (or lowering) its own quantities.
+    held = _sale_stock_usage(sale)
     for inv in inventories:
+        inv.available = inv.quantity + held.get(inv.pk, 0)
         # Avoid duplicate appending if any
         if inv not in inventories_by_product[inv.product.pk]:
             inventories_by_product[inv.product.pk].append(inv)
@@ -980,6 +1011,11 @@ def sale_edit(request, pk):
         sale_form = SaleForm(request.POST, instance=sale)
         post_data = request.POST.copy()
         
+        # Rows already on this sale, by id. A row that stays on its batch keeps
+        # the price it was sold at; only a new row, or one moved to another
+        # batch, takes the batch's current price (as sale_create does).
+        existing_items = {item.pk: item for item in sale.items.all()}
+
         total_forms = int(post_data.get('items-TOTAL_FORMS', 0))
         for i in range(total_forms):
             prefix = f'items-{i}'
@@ -996,9 +1032,13 @@ def sale_edit(request, pk):
                 try:
                     inv = Inventory.objects.select_related('shipment', 'product').get(pk=batch_id)
                     shipment = inv.shipment
-                    product = inv.product
-                    if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-                        base_price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                    raw_id = post_data.get(f'{prefix}-id') or ''
+                    kept = existing_items.get(int(raw_id)) if raw_id.isdigit() else None
+                    if kept is not None and kept.inventory_id == inv.pk:
+                        # Unchanged price, so the row isn't re-saved just for it.
+                        post_data[f'{prefix}-price'] = str(kept.price)
+                    elif shipment:
+                        base_price = float(shipment.sale_price_sdg or 0)
                         if price_discount and float(price_discount) > 0:
                             price = base_price * (1 - float(price_discount) / 100)
                         else:
@@ -1017,12 +1057,9 @@ def sale_edit(request, pk):
             try:
                 from django.db import transaction
                 with transaction.atomic():
-                    # Temporarily revert inventory for old items
-                    for item in sale.items.all():
-                        returned_qty = sum(rp.quantity for rp in item.returns.all())
-                        net_to_restore = (item.quantity + item.free_units) - returned_qty
-                        item.inventory.quantity += net_to_restore
-                        item.inventory.save()
+                    # Stock this sale holds now; after saving, only the per-batch
+                    # difference is moved (see _move_sale_stock).
+                    old_usage = _sale_stock_usage(sale)
 
                     saved_sale = sale_form.save()
                     sale_items = formset.save(commit=False)
@@ -1039,9 +1076,11 @@ def sale_edit(request, pk):
                         form.instance.inventory = inv
                         
                         shipment = inv.shipment
-                        product = inv.product
-                        if shipment and shipment.sale_usd is not None and product.exchange_rate is not None:
-                            form.instance.price = float(shipment.sale_usd or 0) * float(product.exchange_rate or 0)
+                        kept = existing_items.get(form.instance.pk)
+                        if kept is not None and kept.inventory_id == inv.pk:
+                            form.instance.price = kept.price
+                        elif shipment:
+                            form.instance.price = float(shipment.sale_price_sdg or 0)
                         else:
                             form.instance.price = 0
                             
@@ -1060,14 +1099,13 @@ def sale_edit(request, pk):
                         if total_units < returned_qty:
                             raise ValueError(f"كمية الصنف {item.inventory.product.name} لا يمكن أن تكون أقل من ما تم إرجاعه ({returned_qty}).")
 
-                        net_to_deduct = total_units - returned_qty
-                        item.inventory.quantity -= net_to_deduct
-                        if item.inventory.quantity < 0:
-                            raise ValueError(f"كمية غير كافية في الدفعة للمنتج {item.inventory.product.name}")
-                        item.inventory.save()
                         item.save()
                         total += item.get_total
-                        
+
+                    # Usage is read back from the saved rows, so unchanged rows
+                    # (which formset.save skips) are counted too.
+                    _move_sale_stock(old_usage, _sale_stock_usage(saved_sale))
+
                     saved_sale.total = total
                     saved_sale.save()
                     formset.save_m2m()
@@ -1094,6 +1132,9 @@ def sale_edit(request, pk):
 
                 messages.success(request, "تم تعديل الفاتورة بنجاح.")
                 return redirect('panel:sale_detail', pk=saved_sale.pk)
+            except _SaleFormError as e:
+                for msg in e.args:
+                    messages.error(request, msg)
             except ValueError as e:
                 messages.error(request, str(e))
                 # The exception will cancel the transaction, inventory is preserved in DB.
@@ -3041,3 +3082,47 @@ def manager_commission_pay(request, manager_id):
     )
     messages.success(request, f"تم تسجيل دفعة عمولة للمدير بمبلغ {amount} بنجاح.")
     return redirect(redirect_url)
+
+
+# --- System update (pull the latest version from GitHub) --------------------
+# Open to every logged-in user: each laptop is updated by whoever uses it, and
+# the update only ever installs the code from the project's GitHub repository.
+# The work itself happens in a background process (see panel/updater.py).
+
+def _update_status():
+    status = updater.read_status()
+    running = updater.is_running()
+    if status.get('state') in ('starting', 'running') and not running:
+        status.update(state='failed', message="توقف التحديث قبل اكتماله. يمكنك المحاولة مرة أخرى.")
+    finished = status.get('finished_at')
+    return {
+        **status,
+        'running': running,
+        'finished_display': datetime.fromtimestamp(finished).strftime('%Y-%m-%d %H:%M') if finished else '',
+    }
+
+
+def system_update(request):
+    return render(request, 'panel/system_update.html', {
+        'active_sidebar': 'system_update',
+        'version': updater.current_version(),
+        'allowed': updater.web_update_allowed(),
+        'status': _update_status(),
+        'log': updater.read_log_tail(),
+    })
+
+
+@require_POST
+def system_update_start(request):
+    if not updater.web_update_allowed():
+        messages.error(request, "يتم تحديث الخادم من سطر الأوامر: python manage.py update_system")
+    # Under runserver's autoreloader, RUN_MAIN is set and touching a source
+    # file restarts the app onto the new code.
+    elif not updater.launch('touch' if os.environ.get('RUN_MAIN') == 'true' else 'none'):
+        messages.warning(request, "يوجد تحديث قيد التنفيذ بالفعل.")
+    return redirect('panel:system_update')
+
+
+@require_GET
+def system_update_status(request):
+    return JsonResponse({**_update_status(), 'log': updater.read_log_tail()})
