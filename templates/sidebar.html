@@ -113,7 +113,7 @@
       </a>
     </li>
 
-    {# ---- Finance (manager only: company balances, partners, exchange) ---- #}
+    {# ---- Finance (manager only: company balances, partners) ---- #}
     {% if is_manager %}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'finance_dashboard' %}active bg-gradient-info{% endif %}" href="{% url 'financial_dashboard' %}">
@@ -131,6 +131,9 @@
         <span class="nav-link-text ms-1 m-1">الشركاء</span>
       </a>
     </li>
+    {% endif %}
+
+    {# ---- Currency exchange (all roles: reps record their field exchanges) ---- #}
     <li class="nav-item">
       <a class="nav-link text-white nav-link {% if active == 'currency_purchases' %}active bg-gradient-info{% endif %}" href="{% url 'currency_purchases_list' %}">
         <div class="text-white text-center me-2 d-flex align-items-center justify-content-center">
@@ -139,7 +142,6 @@
         <span class="nav-link-text ms-1 m-1">تبديل العملات</span>
       </a>
     </li>
-    {% endif %}
 
     {# ---- Data sync (all roles) ---- #}
     <li class="nav-item">

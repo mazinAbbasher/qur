@@ -57,6 +57,9 @@ _SPECS = [
     SyncSpec('panel.SupplierPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.Currency', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.Partner', 'reference', salesperson_readable=False, salesperson_writable=False),
+    # Reps do record currency exchanges, but NOT through push: each one must
+    # pass the server's company-balance check first, so it goes through
+    # api_currency_exchange instead (see sync/client.submit_currency_exchange).
     SyncSpec('finance.CurrencyExchange', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.PartnerTransaction', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.FinancialLog', 'reference', salesperson_readable=False, salesperson_writable=False),

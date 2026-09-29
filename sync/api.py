@@ -14,6 +14,7 @@ the same role policy as the UI:
 
 import json
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -136,3 +137,58 @@ def api_push(request):
         'rejected': sorted(set(rejected)),
         'server_time': timezone.now().isoformat(),
     })
+
+
+@csrf_exempt
+@require_POST
+def api_currency_exchange(request):
+    """Record one currency exchange from a laptop — only if the company holds
+    enough of the sold currency.
+
+    A salesperson laptop can't check the company balance itself (finance data
+    isn't synced to reps), and exchanges aren't accepted through ``push`` from
+    them, so this is the only way a rep's exchange reaches the server. The
+    response never includes the balance: a shortfall is just a 409.
+    """
+    from decimal import Decimal, InvalidOperation
+
+    from finance.models import Currency, CurrencyExchange
+    from finance.views import calculate_company_balance
+
+    body = _load_body(request)
+    if body is None:
+        return JsonResponse({'ok': False, 'error': 'invalid_json'}, status=400)
+    node = _authenticate(request, body)
+    if node is None:
+        return JsonResponse({'ok': False, 'error': 'unauthorized'}, status=401)
+
+    row = body.get('row') or {}
+    fields = row.get('fields') or {}
+    if row.get('label') != 'finance.CurrencyExchange' or row.get('is_deleted'):
+        return JsonResponse({'ok': False, 'error': 'invalid_row'}, status=400)
+    # A retry of an exchange we already recorded (the laptop lost our reply).
+    if CurrencyExchange.objects.filter(sync_id=row.get('sync_id')).exists():
+        return JsonResponse({'ok': True})
+    try:
+        sold_amount = Decimal(str(fields['sold_amount']))
+    except (KeyError, InvalidOperation):
+        return JsonResponse({'ok': False, 'error': 'invalid_row'}, status=400)
+
+    with transaction.atomic():
+        # Lock the sold currency so two reps can't both spend the same balance.
+        sold = (Currency.objects.select_for_update()
+                .filter(sync_id=fields.get('sold_currency')).first())
+        if sold is None:
+            return JsonResponse({'ok': False, 'error': 'invalid_row'}, status=400)
+        if calculate_company_balance(sold) < sold_amount:
+            return JsonResponse({'ok': False, 'error': 'insufficient_balance'}, status=409)
+        stats = apply_batch([row], is_pull=False, node_name=node.name)
+        if stats['applied'] != 1:
+            transaction.set_rollback(True)
+            return JsonResponse({'ok': False, 'error': 'invalid_row'}, status=400)
+
+    SyncLog.objects.create(
+        node_name=node.name, direction='push', finished_at=timezone.now(),
+        pushed=1, ok=True, message=f'currency exchange {row.get("sync_id")}',
+    )
+    return JsonResponse({'ok': True})

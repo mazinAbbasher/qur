@@ -316,6 +316,11 @@ class SaleItem(SyncModel):
         return self.discounted_unit_price * self.quantity
 
     @property
+    def total_before_discount(self):
+        # Total at the original price, before price discount (paid units only)
+        return self.price * self.quantity
+
+    @property
     def total_units(self):
         # Total units delivered (paid + free)
         return self.quantity + self.free_units

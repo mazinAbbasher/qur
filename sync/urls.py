@@ -16,4 +16,5 @@ urlpatterns = [
     path('run/', views.run, name='run'),
     path('api/pull/', api.api_pull, name='api_pull'),
     path('api/push/', api.api_push, name='api_push'),
+    path('api/currency-exchange/', api.api_currency_exchange, name='api_currency_exchange'),
 ]

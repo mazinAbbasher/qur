@@ -90,6 +90,37 @@ def push():
     return data
 
 
+def submit_currency_exchange(exchange):
+    """Salesperson laptop: have the server check the company balance and record
+    ``exchange`` (an unsaved CurrencyExchange). Returns None on success, else an
+    error message for the form — never the balance itself.
+
+    Our pending outbox is pushed first so this rep's own collected payments
+    count toward the balance. On success the exchange is saved locally under the
+    apply guard: the server already holds it, so it must not be queued for push
+    (reps can't push exchanges — see sync/registry.py).
+    """
+    import requests
+
+    from .tracking import apply_guard
+
+    try:
+        push()
+        _post('/sync/api/currency-exchange/',
+              {'row': serialize_instance(exchange, role='salesperson')})
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 409:
+            return (f"رصيد الشركة من {exchange.sold_currency.code} "
+                    f"غير كافٍ لإتمام عملية التبديل.")
+        return "تعذّر تسجيل العملية على الخادم. حاول مرة أخرى."
+    except Exception:  # offline / not configured / timeout
+        return ("تعذّر الاتصال بالخادم للتحقق من الرصيد. "
+                "تأكد من الاتصال بالإنترنت ثم حاول مرة أخرى.")
+    with apply_guard():
+        exchange.save()
+    return None
+
+
 def _clamped_cursor(server_cursor, deferred_min):
     """Keep the pull cursor from advancing past a row we couldn't apply yet.
 

@@ -14,7 +14,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils.dateparse import parse_datetime
 
-from finance.models import Currency
+from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
     Client, Commission, Employee, Expense, Inventory, Invoice, InvoicePayment,
     Product, Sale, SaleItem, Shipment, ReturnedProduct,
@@ -179,6 +179,90 @@ class ExpensePolicyTests(SyncSetup):
         data = self.pull('tok-mgr').json()
         self.assertTrue([r for r in data['changes']
                          if r['label'] == 'panel.Expense'])
+
+
+class CurrencyExchangePolicyTests(SyncSetup):
+    """A rep's exchange reaches the server only through api_currency_exchange,
+    which refuses it unless the company holds enough of the sold currency. The
+    company's exchange history is never sent down to a rep."""
+
+    def setUp(self):
+        super().setUp()
+        self.sdg = Currency.objects.get(code='SDG')
+        self.usd = Currency.objects.get(code='USD')
+
+    def exchange_row(self, uid):
+        return row('finance.CurrencyExchange', uid,
+                   sold_currency=str(self.sdg.sync_id),
+                   bought_currency=str(self.usd.sync_id),
+                   sold_amount='600000', bought_amount='100',
+                   exchange_rate='6000', date='2026-09-01')
+
+    def post_exchange(self, token, exchange):
+        return self.client.post(
+            reverse('sync:api_currency_exchange'),
+            data=json.dumps({'row': exchange}),
+            content_type='application/json',
+            HTTP_X_SYNC_TOKEN=token,
+        )
+
+    def deposit_sdg(self, amount):
+        PartnerTransaction.objects.create(
+            partner=Partner.objects.create(full_name='P'), transaction_type='deposit',
+            amount=Decimal(amount), currency=self.sdg)
+
+    def test_salesperson_cannot_push_exchange(self):
+        # Push would skip the balance check, so it's closed to reps.
+        self.deposit_sdg('1000000')
+        uid = uuid.uuid4()
+        resp = self.push('tok-sales', [self.exchange_row(uid)])
+        self.assertIn('finance.CurrencyExchange', resp.json()['rejected'])
+        self.assertFalse(CurrencyExchange.objects.filter(sync_id=uid).exists())
+
+    def test_endpoint_refuses_short_balance_without_revealing_it(self):
+        self.deposit_sdg('12345')
+        uid = uuid.uuid4()
+        resp = self.post_exchange('tok-sales', self.exchange_row(uid))
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(resp.json(), {'ok': False, 'error': 'insufficient_balance'})
+        self.assertFalse(CurrencyExchange.objects.filter(sync_id=uid).exists())
+
+    def test_endpoint_records_exchange_when_balance_enough(self):
+        self.deposit_sdg('1000000')
+        uid = uuid.uuid4()
+        resp = self.post_exchange('tok-sales', self.exchange_row(uid))
+        self.assertEqual(resp.status_code, 200)
+        ex = CurrencyExchange.objects.get(sync_id=uid)
+        self.assertEqual(ex.sold_currency, self.sdg)
+        self.assertEqual(ex.bought_amount, Decimal('100'))
+        # A retry (laptop lost the reply) is accepted without a duplicate,
+        # even though the balance no longer covers a second exchange.
+        resp = self.post_exchange('tok-sales', self.exchange_row(uid))
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(CurrencyExchange.objects.filter(sync_id=uid).count(), 1)
+
+    def test_second_exchange_cannot_spend_the_same_balance(self):
+        self.deposit_sdg('1000000')
+        self.assertEqual(self.post_exchange('tok-sales', self.exchange_row(uuid.uuid4())).status_code, 200)
+        self.assertEqual(self.post_exchange('tok-sales', self.exchange_row(uuid.uuid4())).status_code, 409)
+        self.assertEqual(CurrencyExchange.objects.count(), 1)
+
+    def test_endpoint_requires_token(self):
+        resp = self.post_exchange('nope', self.exchange_row(uuid.uuid4()))
+        self.assertEqual(resp.status_code, 401)
+
+    def test_pull_hides_exchanges_from_salesperson(self):
+        CurrencyExchange.objects.create(
+            sold_currency=Currency.objects.get(code='SDG'),
+            bought_currency=Currency.objects.get(code='USD'),
+            sold_amount=Decimal('600000'), bought_amount=Decimal('100'),
+            exchange_rate=Decimal('6000'))
+        rep = self.pull('tok-sales').json()
+        self.assertFalse([r for r in rep['changes']
+                          if r['label'] == 'finance.CurrencyExchange'])
+        mgr = self.pull('tok-mgr').json()
+        self.assertTrue([r for r in mgr['changes']
+                         if r['label'] == 'finance.CurrencyExchange'])
 
 
 class ApplyEngineTests(SyncSetup):

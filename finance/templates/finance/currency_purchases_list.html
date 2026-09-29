@@ -74,8 +74,10 @@
             <td>{{ purchase.date }}</td>
             <td>{{ purchase.note }}</td>
             <td>
+              {% if is_manager %}
               <a href="{% url 'currency_purchase_edit' purchase.id %}" class="btn btn-warning btn-sm">تعديل</a>
               <a href="{% url 'currency_purchase_delete' purchase.id %}" class="btn btn-danger btn-sm" >حذف</a>
+              {% endif %}
             </td>
           </tr>
           {% empty %}

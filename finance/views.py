@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db.models import Sum, Q, F, ExpressionWrapper, DecimalField
 from django.core.exceptions import ValidationError
@@ -10,6 +11,7 @@ from .models import (
 from django.db import models
 from .forms import PartnerForm, PartnerTransactionForm, CurrencyPurchaseForm
 from panel.models import Shipment, SupplierPayment, Expense, CommissionPayment, InvoicePayment
+from panel.permissions import is_manager
 from django.views.decorators.http import require_GET
 
 # --- Company Balances and Dashboard ---
@@ -389,21 +391,34 @@ def currency_purchase_add(request):
     if request.method == 'POST':
         form = CurrencyPurchaseForm(request.POST)
         if form.is_valid():
-            # ensure sold amount is existed in the company balances
             sold_currency = form.cleaned_data['sold_currency']
             sold_amount = form.cleaned_data['sold_amount']
-            if sold_currency and sold_amount:
-                balance = calculate_company_balance(sold_currency)
-                if balance < sold_amount:
-                    form.add_error('sold_amount', f"Insufficient balance for {sold_currency.code}. Available: {balance}")
-                    return render(request, 'finance/currency_purchase_form.html', {'form': form, 'active_sidebar': 'currency_purchases'})
             # calculate exchange rate
             bought_currency = form.cleaned_data['bought_currency']
             bought_amount = form.cleaned_data['bought_amount']
             if bought_currency and bought_amount and sold_currency and sold_amount:
                 exchange_rate =  sold_amount /  bought_amount
                 form.instance.exchange_rate = exchange_rate
-            form.save()
+            if getattr(settings, 'SYNC_ROLE', '') == 'salesperson':
+                # A salesperson laptop holds no finance data, so the server
+                # checks the balance and records the exchange.
+                from sync.client import submit_currency_exchange
+                error = submit_currency_exchange(form.instance)
+            else:
+                # ensure sold amount is existed in the company balances
+                error = None
+                balance = calculate_company_balance(sold_currency)
+                if balance < sold_amount:
+                    # Only managers may see the balance itself.
+                    if is_manager(request.user):
+                        error = f"Insufficient balance for {sold_currency.code}. Available: {balance}"
+                    else:
+                        error = f"رصيد الشركة من {sold_currency.code} غير كافٍ لإتمام عملية التبديل."
+                else:
+                    form.save()
+            if error:
+                form.add_error('sold_amount', error)
+                return render(request, 'finance/currency_purchase_form.html', {'form': form, 'active_sidebar': 'currency_purchases'})
             return redirect('currency_purchases_list')
     else:
         form = CurrencyPurchaseForm()

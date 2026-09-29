@@ -7,13 +7,16 @@ These use an isolated test database; the real db.sqlite3 is never touched.
 import re
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest import mock
 
+import requests
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.contrib.messages import get_messages
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
+from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
     Inventory, Invoice, InvoicePayment, Product, ReturnedProduct, Sale,
     SaleItem, Shipment,
@@ -53,7 +56,9 @@ class AccessControlTests(TestCase):
                      'panel:manager_list', 'panel:supplier_list',
                      'panel:area_list', 'panel:lost_product_list',
                      # Reps log their own daily field expenses.
-                     'panel:expense_list', 'panel:expense_add']:
+                     'panel:expense_list', 'panel:expense_add',
+                     # ...and the currency exchanges they make.
+                     'currency_purchases_list', 'currency_purchase_add']:
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 200, f"{name} should be allowed")
 
@@ -68,8 +73,8 @@ class AccessControlTests(TestCase):
             'panel:product_add',
             'panel:shipment_create', 'panel:employee_add',
             'panel:manager_add', 'panel:supplier_add',
-            # whole finance app blocked by path prefix
-            'financial_dashboard',
+            # rest of the finance app blocked by path prefix
+            'financial_dashboard', 'partners_list', 'partner_add',
         ]
         for name in denied:
             resp = self.client.get(reverse(name))
@@ -111,6 +116,117 @@ class AccessControlTests(TestCase):
 
         self.client.force_login(self.manager)
         self.assertIn('تكلفة', self.client.get(url).content.decode())
+
+    # --- Currency exchange: reps record it, without finance data --------
+    def test_sidebar_shows_exchange_but_not_finance_for_salesperson(self):
+        self.client.force_login(self.rep)
+        html = self.client.get(reverse('panel:sale_list')).content.decode()
+        self.assertIn(reverse('currency_purchases_list'), html)
+        self.assertNotIn(reverse('financial_dashboard'), html)
+        self.assertNotIn(reverse('partners_list'), html)
+
+    def _exchange_post(self):
+        sdg = Currency.objects.get(code='SDG')
+        usd = Currency.objects.get(code='USD')
+        return {'bought_currency': usd.pk, 'bought_amount': '100',
+                'sold_currency': sdg.pk, 'sold_amount': '600000',
+                'date': '2026-09-01', 'note': ''}
+
+    def _deposit_sdg(self, amount):
+        PartnerTransaction.objects.create(
+            partner=Partner.objects.create(full_name='P'), transaction_type='deposit',
+            amount=Decimal(amount), currency=Currency.objects.get(code='SDG'))
+
+    def test_salesperson_blocked_without_balance_and_never_sees_it(self):
+        self._deposit_sdg('12345')          # short of the 600,000 being sold
+        self.client.force_login(self.rep)
+        resp = self.client.post(reverse('currency_purchase_add'), self._exchange_post())
+        html = resp.content.decode()
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('غير كافٍ', html)
+        self.assertNotIn('12345', html)
+        self.assertNotIn('12,345', html)
+        self.assertFalse(CurrencyExchange.objects.exists())
+
+    def test_salesperson_adds_exchange_with_enough_balance(self):
+        self._deposit_sdg('1000000')
+        self.client.force_login(self.rep)
+        resp = self.client.post(reverse('currency_purchase_add'), self._exchange_post())
+        self.assertRedirects(resp, reverse('currency_purchases_list'),
+                             fetch_redirect_response=False)
+        ex = CurrencyExchange.objects.get()
+        self.assertEqual(ex.exchange_rate, Decimal('6000'))
+
+    def test_salesperson_cannot_edit_or_delete_exchange(self):
+        ex = CurrencyExchange.objects.create(
+            sold_currency=Currency.objects.get(code='SDG'),
+            bought_currency=Currency.objects.get(code='USD'),
+            sold_amount=Decimal('600000'), bought_amount=Decimal('100'),
+            exchange_rate=Decimal('6000'))
+        self.client.force_login(self.rep)
+        html = self.client.get(reverse('currency_purchases_list')).content.decode()
+        self.assertNotIn(reverse('currency_purchase_edit', args=[ex.pk]), html)
+        for name in ['currency_purchase_edit', 'currency_purchase_delete']:
+            resp = self.client.post(reverse(name, args=[ex.pk]))
+            self.assertEqual(resp['Location'], reverse('panel:sale_list'))
+        self.assertTrue(CurrencyExchange.objects.filter(pk=ex.pk).exists())
+
+    def test_manager_exchange_still_checks_balance(self):
+        self.client.force_login(self.manager)
+        resp = self.client.post(reverse('currency_purchase_add'), self._exchange_post())
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Insufficient balance', resp.content.decode())
+        self.assertFalse(CurrencyExchange.objects.exists())
+
+
+@override_settings(SYNC_ROLE='salesperson')
+class SalespersonLaptopExchangeTests(TestCase):
+    """On a rep laptop the server checks the balance and records the exchange
+    (sync.client.submit_currency_exchange); the network is mocked here."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        cls.rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+
+    def setUp(self):
+        self.client.force_login(self.rep)
+        self.sdg = Currency.objects.get(code='SDG')
+        self.post = {'bought_currency': Currency.objects.get(code='USD').pk,
+                     'bought_amount': '100', 'sold_currency': self.sdg.pk,
+                     'sold_amount': '600000', 'date': '2026-09-01', 'note': ''}
+
+    def _submit(self, server_reply):
+        with mock.patch('sync.client.push') as push, \
+                mock.patch('sync.client._post', side_effect=server_reply) as post:
+            resp = self.client.post(reverse('currency_purchase_add'), self.post)
+        return resp, push, post
+
+    def test_server_accepts_exchange_is_saved_locally_not_queued(self):
+        resp, push, post = self._submit(lambda path, payload: {'ok': True})
+        self.assertEqual(resp.status_code, 302)
+        push.assert_called_once()          # rep's pending payments go up first
+        row = post.call_args.args[1]['row']
+        self.assertEqual(row['fields']['sold_currency'], str(self.sdg.sync_id))
+        ex = CurrencyExchange.objects.get()
+        self.assertEqual(str(ex.sync_id), row['sync_id'])
+        # The server already has it; pushing would be rejected anyway.
+        self.assertFalse(SyncOutbox.objects.filter(
+            model_label='finance.CurrencyExchange').exists())
+
+    def test_server_refuses_short_balance(self):
+        short = requests.Response()
+        short.status_code = 409
+        resp, _, _ = self._submit(requests.HTTPError(response=short))
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('غير كافٍ', resp.content.decode())
+        self.assertFalse(CurrencyExchange.objects.exists())
+
+    def test_offline_is_refused(self):
+        resp, _, _ = self._submit(requests.ConnectionError())
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('تعذّر الاتصال بالخادم', resp.content.decode())
+        self.assertFalse(CurrencyExchange.objects.exists())
 
 
 @override_settings(SYNC_ROLE='server')

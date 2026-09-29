@@ -2121,20 +2121,21 @@ def invoice_mark_unpaid(request, pk):
 
 @require_GET
 def invoice_pdf(request, pk):
+    from decimal import Decimal
     invoice = get_object_or_404(Invoice, pk=pk)
-    # --- Add this block ---
-    discounted_items = []
-    for item in invoice.sale.items.all():
-        if (getattr(item, 'free_goods_discount', 0) and float(item.free_goods_discount) > 0) or \
-           (getattr(item, 'price_discount', 0) and float(item.price_discount) > 0):
-            discounted_items.append(item)
-    has_discount = bool(discounted_items)
-    # --- End block ---
-    # --- Add returned products ---
-    returned_products = invoice.sale.returned_products.select_related(
+    items = list(invoice.sale.items.select_related('inventory__product'))
+    returned_products = list(invoice.sale.returned_products.select_related(
         'sale_item', 'sale_item__inventory', 'sale_item__inventory__product'
-    ).all()
-    # --- End returned products ---
+    ))
+    # Totals box: subtotal at original prices, minus discount, minus returns.
+    # The discount is taken as the remainder against the stored sale total so
+    # the rows always add up to the Grand Total, even where rounding the
+    # discounted prices would otherwise leave them a cent apart.
+    subtotal = sum((item.total_before_discount for item in items), Decimal('0'))
+    returns_total = Decimal(str(round(sum(r.value for r in returned_products), 2)))
+    discount_total = Decimal('0')
+    if any(item.price_discount > 0 for item in items):
+        discount_total = subtotal - returns_total - invoice.sale.total
     from django.template.loader import render_to_string
     from weasyprint import HTML, CSS
     import tempfile
@@ -2143,9 +2144,12 @@ def invoice_pdf(request, pk):
         {
             'invoice': invoice,
             'request': request,
-            'has_discount': has_discount,  # pass to template
-            'discounted_items': discounted_items,  # pass to template
-            'returned_products': returned_products,  # pass to template
+            'items': items,
+            'returned_products': returned_products,
+            'subtotal': subtotal,
+            'discount_total': discount_total,
+            'returns_total': returns_total,
+            'free_units_total': sum(item.free_units for item in items),
         }
     )
     pdf_css = """

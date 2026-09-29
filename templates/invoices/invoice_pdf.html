@@ -91,6 +91,7 @@
             margin: 28px 32px 8px 32px;
             border-left: 2px solid #bbb;
             padding-left: 8px;
+            break-after: avoid;
         }
         .table-container {
             margin: 0 32px;
@@ -126,15 +127,57 @@
             font-weight: bold;
             text-align: right;
         }
-        .discounts-list {
-            margin: 0.5em 0 0 0;
-            padding: 0;
-            list-style: none;
-            color: #555;
-            font-size: 0.98em;
+        th.num, td.num {
+            text-align: right;
         }
-        .discounts-list li {
-            margin-bottom: 2px;
+        .price-old {
+            color: #999;
+            font-size: 0.85em;
+        }
+        .price-old s {
+            text-decoration-color: #d32f2f;
+        }
+        .price-new {
+            color: #2e7d32;
+            font-weight: bold;
+        }
+        .tag {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-radius: 8px;
+            padding: 1px 6px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .summary {
+            width: 300px;
+            margin: 20px 32px 0 auto;
+            break-inside: avoid;
+        }
+        .summary td {
+            border-bottom: none;
+            padding: 4px;
+        }
+        .summary .discount-row td {
+            color: #2e7d32;
+        }
+        .summary .grand-total td {
+            border-top: 2px solid #bbb;
+            padding-top: 8px;
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        .savings {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background: #e8f5e9;
+            color: #1b5e20;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .savings strong {
+            white-space: nowrap;
         }
         .footer {
             margin-top: 36px;
@@ -150,11 +193,6 @@
             text-align: left;
             font-size: 1em;
             color: #222;
-        }
-        th.free-units-col, td.free-units-col {
-            {% comment %} text-align: right; {% endcomment %}
-            color:rgb(95, 190, 5);
-            font-size: 0.98em;
         }
         @media (max-width: 700px) {
             .invoice-container, .my-header, .meta-section, .amounts-row, .section-title, .table-container {
@@ -196,15 +234,15 @@
         <div class="amounts-row">
             <div class="amount-card">
                 <strong>Paid</strong>
-                <span class="amount">{{ invoice.paid_amount|floatformat:"2" }} SDG</span>
+                <span class="amount">{{ invoice.paid_amount|floatformat:"2g" }} SDG</span>
             </div>
             <div class="amount-card">
                 <strong>Remaining</strong>
-                <span class="amount">{{ invoice.remaining_amount|floatformat:"2" }} SDG</span>
+                <span class="amount">{{ invoice.remaining_amount|floatformat:"2g" }} SDG</span>
             </div>
             <div class="amount-card">
                 <strong>Total</strong>
-                <span class="amount">{{ invoice.sale.total|floatformat:"2" }} SDG</span>
+                <span class="amount">{{ invoice.sale.total|floatformat:"2g" }} SDG</span>
             </div>
         </div>
         <div class="section-title">Products Details</div>
@@ -213,63 +251,38 @@
                 <thead>
                     <tr>
                         <th>Product</th>
-                        <th>Quantity</th>
-                        {% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}
-                        <th class="free-units-col">Free Units</th>
-                        {% endif %}
-                        <th>Unit Price</th>
-                        <th>Total</th>
+                        <th class="num">Quantity</th>
+                        <th class="num">Unit Price</th>
+                        <th class="num">Total</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for item in invoice.sale.items.all %}
+                    {% for item in items %}
                     <tr>
                         <td>{{ item.inventory.product.name }}</td>
-                        <td>{{ item.quantity }}</td>
-                        {% if has_discount and discounted_items|length > 0 and discounted_items.0.free_goods_discount|floatformat:"2" != "0.00" %}
-                        <td class="free-units-col">
-                            {% if item.free_goods_discount|floatformat:"2" != "0.00" %}
-                                {{ item.free_units }}
+                        <td class="num">
+                            {{ item.quantity }}
+                            {% if item.free_units %}<span class="tag">+{{ item.free_units }} free</span>{% endif %}
+                        </td>
+                        <td class="num">
+                            {% if item.price_discount > 0 %}
+                                <div class="price-old"><span class="tag">&minus;{{ item.price_discount|floatformat:"-2" }}%</span> <s>{{ item.price|floatformat:"2g" }}</s></div>
+                                <div class="price-new">{{ item.discounted_unit_price|floatformat:"2g" }}</div>
                             {% else %}
-                                0
+                                {{ item.price|floatformat:"2g" }}
                             {% endif %}
                         </td>
-                        {% endif %}
-                        <td>
-                            {% if item.price_discount|floatformat:"2" != "0.00" %}
-                                {{ item.discounted_unit_price|floatformat:"2" }}
+                        <td class="num">
+                            {% if item.price_discount > 0 %}
+                                <div class="price-old"><s>{{ item.total_before_discount|floatformat:"2g" }}</s></div>
+                                <div class="price-new">{{ item.get_total|floatformat:"2g" }}</div>
                             {% else %}
-                                {{ item.price|floatformat:"2" }}
+                                {{ item.get_total|floatformat:"2g" }}
                             {% endif %}
-                        </td>
-                        <td>
-                            {{ item.get_total|floatformat:"2" }}
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
-                {% if has_discount %}
-                <tr>
-                    <th colspan="5" style="text-align:left;">
-                        Discounts Applied:
-                        <ul class="discounts-list">
-                            {% for item in discounted_items %}
-                                <li>
-                                    {{ item.inventory.product.name }}:
-                                    {% if item.free_goods_discount|floatformat:"2" != "0.00" %}
-                                        Free Goods Discount: {{ item.free_goods_discount|floatformat:"2" }}% ({{ item.free_units }} units)
-                                    {% endif %}
-                                    {% if item.price_discount|floatformat:"2" != "0.00" %}
-                                        {% if item.free_goods_discount|floatformat:"2" != "0.00" %} &ndash; {% endif %}
-                                        Price Discount: {{ item.price_discount|floatformat:"2" }}%
-                                    {% endif %}
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    </th>
-                </tr>
-                {% endif %}
-                
             </table>
         </div>
         {% if returned_products and returned_products|length > 0 %}
@@ -279,7 +292,7 @@
                 <thead>
                     <tr>
                         <th>Product</th>
-                        <th>Quantity</th>
+                        <th class="num">Quantity</th>
                         <th>Value</th>
                         {% comment %} <th>Note</th> {% endcomment %}
                     </tr>
@@ -288,8 +301,8 @@
                     {% for returned in returned_products %}
                     <tr>
                         <td>{{ returned.sale_item.inventory.product.name }}</td>
-                        <td>{{ returned.quantity }}</td>
-                        <td>{{ returned.value|floatformat:"2" }}</td>
+                        <td class="num">{{ returned.quantity }}</td>
+                        <td>{{ returned.value|floatformat:"2g" }}</td>
                         {% comment %} <td>{{ returned.note|default:"-" }}</td> {% endcomment %}
                     </tr>
                     {% endfor %}
@@ -297,6 +310,42 @@
             </table>
         </div>
         {% endif %}
+        <div class="summary">
+            <table>
+                {% if discount_total or returns_total %}
+                <tr>
+                    <td>Subtotal</td>
+                    <td>{{ subtotal|floatformat:"2g" }}</td>
+                </tr>
+                {% endif %}
+                {% if discount_total %}
+                <tr class="discount-row">
+                    <td>Discount</td>
+                    <td>&minus;{{ discount_total|floatformat:"2g" }}</td>
+                </tr>
+                {% endif %}
+                {% if returns_total %}
+                <tr>
+                    <td>Returns</td>
+                    <td>&minus;{{ returns_total|floatformat:"2g" }}</td>
+                </tr>
+                {% endif %}
+                <tr class="grand-total">
+                    <td>Grand Total</td>
+                    <td>{{ invoice.sale.total|floatformat:"2g" }} SDG</td>
+                </tr>
+            </table>
+            {% if discount_total or free_units_total %}
+            <div class="savings">
+                {% if discount_total %}
+                    You saved <strong>{{ discount_total|floatformat:"2g" }} SDG</strong>
+                    {% if free_units_total %} and got <strong>{{ free_units_total }} free unit{{ free_units_total|pluralize }}</strong>{% endif %}
+                {% else %}
+                    You got <strong>{{ free_units_total }} free unit{{ free_units_total|pluralize }}</strong>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
         {% if invoice.payments.exists %}
         <div class="section-title">Payment History</div>
         <div class="table-container">
@@ -312,7 +361,7 @@
                     {% for p in invoice.payments.all %}
                     <tr>
                         <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
-                        <td style="text-align:right;">{{ p.amount|floatformat:"2" }}</td>
+                        <td style="text-align:right;">{{ p.amount|floatformat:"2g" }}</td>
                         {% comment %} <td>{{ p.note|default:"-" }}</td> {% endcomment %}
                     </tr>
                     {% endfor %}
@@ -320,10 +369,6 @@
             </table>
         </div>
         {% endif %}
-
-               <h4 class ="p-2 font-bold" style="margin: 32px 0px 0 32px;"> Grand Total : {{ invoice.sale.total|floatformat:"2" }}</h4>
-
-           
         <div class="signature">
             Thank you for your business!
         </div>
