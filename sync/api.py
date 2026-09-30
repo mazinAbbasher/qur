@@ -7,7 +7,8 @@ themselves. They are the ONLY writable surface for a laptop, and they re-enforce
 the same role policy as the UI:
 
 * ``pull`` only returns models the node's role may read, with sensitive fields
-  already stripped for salespeople.
+  already stripped for salespeople (deletions go to every node: a tombstone
+  carries no data).
 * ``push`` only applies models the node's role may write; anything else is
   rejected server-side regardless of what the client sent.
 """
@@ -23,7 +24,7 @@ from django.views.decorators.http import require_POST
 
 from .engine import apply_batch, collect_server_changes
 from .models import Node, SyncLog
-from .registry import sensitive_fields_for, specs_for_push
+from .registry import pull_policy, sensitive_fields_for, specs_for_push
 
 
 def _get_token(request, body):
@@ -64,6 +65,14 @@ def api_pull(request):
 
     since_raw = body.get('since')
     since = parse_datetime(since_raw) if since_raw else None
+    # The laptop reports the policy its cursor was earned under. If what its
+    # role may read has changed since (e.g. sales became visible to
+    # salespeople), that cursor is past rows it was never sent: resend
+    # everything once. Laptops too old to report one stay incremental.
+    policy = pull_policy(node.role)
+    resend_all = body.get('policy') is not None and body['policy'] != policy
+    if resend_all:
+        since, since_raw = None, None
     try:
         rows, cursor = collect_server_changes(node.role, since)
     except Exception as exc:  # never leak an HTML 500 to the client
@@ -76,10 +85,11 @@ def api_pull(request):
     SyncLog.objects.create(
         node_name=node.name, direction='pull', finished_at=timezone.now(),
         pulled=len(rows), ok=True,
-        message=f'served {len(rows)} rows since {since_raw or "beginning"}',
+        message=(f'served {len(rows)} rows since {since_raw or "beginning"}'
+                 + (' (full resend: sync policy changed)' if resend_all else '')),
     )
     return JsonResponse({
-        'ok': True, 'changes': rows, 'cursor': cursor,
+        'ok': True, 'changes': rows, 'cursor': cursor, 'policy': policy,
         'server_time': timezone.now().isoformat(),
     })
 

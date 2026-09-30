@@ -111,9 +111,10 @@ class SyncTombstone(models.Model):
 
     When the engine deletes a row (reproducing an origin delete), it drops a
     tombstone here. ``pull`` then hands these out like any other change, and
-    other laptops delete their local copy. An upsert of the same ``sync_id``
-    clears its tombstone, so a record is ever either live *or* tombstoned,
-    never both.
+    other laptops delete their local copy. A *push* of a tombstoned row is
+    refused (delete wins, see ``engine._apply_row``); an upsert pulled from the
+    server clears it, so a record is ever either live *or* tombstoned, never
+    both.
     """
 
     model_label = models.CharField(max_length=100)
@@ -133,6 +134,9 @@ class SyncState(models.Model):
     key = models.CharField(max_length=50, unique=True, default='default')
     # Server-clock high-water mark: 'give me changes newer than this'.
     last_pull_cursor = models.DateTimeField(null=True, blank=True)
+    # The server's registry.pull_policy the cursor was earned under. When the
+    # server's differs, it resends everything once (see sync.api.api_pull).
+    pull_policy = models.CharField(max_length=64, blank=True, default='')
     last_pulled_at = models.DateTimeField(null=True, blank=True)
     last_pushed_at = models.DateTimeField(null=True, blank=True)
 

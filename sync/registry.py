@@ -18,6 +18,7 @@ This module contains **policy only** — no database access at import time — s
 is safe to import from migrations, views and the engine alike.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 
 
@@ -67,17 +68,18 @@ _SPECS = [
     # ---- Transactional data (authored on laptops; pushed up) ----------------
     # Clients are shared: salespeople both read (to pick one) and write (add/edit).
     SyncSpec('panel.Client', 'transactional', salesperson_readable=True, salesperson_writable=True),
-    # A salesperson only PUSHES these; they are not sent back down to salesperson
-    # laptops (avoids exposing other reps' sales/totals). Managers pull them all.
-    SyncSpec('panel.Sale', 'transactional', salesperson_readable=False, salesperson_writable=True),
-    SyncSpec('panel.SaleItem', 'transactional', salesperson_readable=False, salesperson_writable=True),
-    SyncSpec('panel.ReturnedProduct', 'transactional', salesperson_readable=False, salesperson_writable=True),
-    SyncSpec('panel.Invoice', 'transactional', salesperson_readable=False, salesperson_writable=True),
-    SyncSpec('panel.InvoicePayment', 'transactional', salesperson_readable=False, salesperson_writable=True),
+    # Sales are fully shared as well: every laptop, manager and salespeople alike,
+    # holds every sale with its items, returns, invoice and payments. A sale the
+    # manager adds, edits or deletes reaches the salespeople on their next sync.
+    SyncSpec('panel.Sale', 'transactional', salesperson_readable=True, salesperson_writable=True),
+    SyncSpec('panel.SaleItem', 'transactional', salesperson_readable=True, salesperson_writable=True),
+    SyncSpec('panel.ReturnedProduct', 'transactional', salesperson_readable=True, salesperson_writable=True),
+    SyncSpec('panel.Invoice', 'transactional', salesperson_readable=True, salesperson_writable=True),
+    SyncSpec('panel.InvoicePayment', 'transactional', salesperson_readable=True, salesperson_writable=True),
     # Expenses are authored on every node: a salesperson records the daily costs
     # they incur in the field and pushes them up; the manager/server records its
-    # own and receives the reps'. Like Sale, a rep only PUSHES (readable=False),
-    # so the company-wide expense total is never exposed on a salesperson laptop.
+    # own and receives the reps'. A rep only PUSHES them (readable=False), so
+    # the company-wide expense total is never exposed on a salesperson laptop.
     # (No FKs, so its position in the apply order is irrelevant.)
     SyncSpec('panel.Expense', 'transactional', salesperson_readable=False, salesperson_writable=True),
 ]
@@ -103,7 +105,7 @@ def is_syncable(label):
 
 def is_shared_writable(label):
     """True for a model multiple nodes can both read AND write (e.g. Client,
-    Area), so two laptops can edit the same record concurrently. Used to audit
+    Area, Sale), so two laptops can edit the same record concurrently. Used to audit
     stale overwrites on push — single-author models can't collide."""
     spec = _BY_LABEL.get(label)
     return bool(spec and spec.salesperson_readable and spec.salesperson_writable)
@@ -130,3 +132,27 @@ def sensitive_fields_for(label, role):
     if spec is None or role != 'salesperson':
         return ()
     return spec.sensitive_fields
+
+
+# Bump to make every salesperson laptop re-download everything on its next sync.
+PULL_POLICY_VERSION = 1
+
+
+def pull_policy(role):
+    """Fingerprint of what the server sends a node of ``role`` on pull.
+
+    A laptop's pull cursor only covers what it was sent under the policy it last
+    synced with. Once a model becomes readable for a role (or a stripped field is
+    released), that cursor is already past rows the laptop was never given, so
+    the server resends everything once when the fingerprint the laptop reports
+    differs from this one (see ``api_pull``).
+
+    Managers always receive everything, so nothing can have been withheld from
+    them: their fingerprint is empty and never forces a resend.
+    """
+    if role != 'salesperson':
+        return ''
+    parts = [f'v{PULL_POLICY_VERSION}']
+    for spec in specs_for_pull(role):
+        parts.append(f"{spec.label}-{','.join(spec.sensitive_fields)}")
+    return hashlib.sha256('|'.join(parts).encode()).hexdigest()[:16]

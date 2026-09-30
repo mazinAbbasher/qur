@@ -9,6 +9,7 @@ import json
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest import mock
 
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -19,9 +20,10 @@ from panel.models import (
     Client, Commission, Employee, Expense, Inventory, Invoice, InvoicePayment,
     Product, Sale, SaleItem, Shipment, ReturnedProduct,
 )
-from sync.client import _clamped_cursor
+from sync import registry
+from sync.client import _clamped_cursor, pull as client_pull
 from sync.engine import apply_batch
-from sync.models import Node, SyncConflict, SyncOutbox
+from sync.models import Node, SyncConflict, SyncOutbox, SyncState
 from sync.serializers import serialize_instance
 
 
@@ -59,10 +61,10 @@ class SyncSetup(TestCase):
             HTTP_X_SYNC_TOKEN=token,
         )
 
-    def pull(self, token, since=None):
+    def pull(self, token, since=None, **body):
         return self.client.post(
             reverse('sync:api_pull'),
-            data=json.dumps({'since': since}),
+            data=json.dumps({'since': since, **body}),
             content_type='application/json',
             HTTP_X_SYNC_TOKEN=token,
         )
@@ -435,8 +437,23 @@ class PushCollisionTests(SyncSetup):
         self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
 
     def test_single_author_model_is_not_audited(self):
-        # Sale is write-only for reps (not shared), so no collision audit even
-        # when the incoming edit looks older than the server copy.
+        # Expense is write-only for reps (not shared), so no collision audit
+        # even when the incoming edit looks older than the server copy.
+        expense = Expense.objects.create(description='Taxi', amount=Decimal('100'),
+                                         date=date(2026, 8, 1))
+        older = (expense.sync_updated_at - timedelta(minutes=5)).isoformat()
+        incoming = row('panel.Expense', expense.sync_id, amount='200')
+        incoming['sync_updated_at'] = older
+
+        stats = apply_batch([incoming], is_pull=False, node_name='rep-1')
+
+        expense.refresh_from_db()
+        self.assertEqual(expense.amount, Decimal('200'))
+        self.assertEqual(stats['conflicts'], 0)
+        self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
+
+    def test_sale_is_shared_so_it_is_audited(self):
+        # The manager and every salesperson hold and edit every sale.
         sale = Sale.objects.create(total=Decimal('1000'))
         older = (sale.sync_updated_at - timedelta(minutes=5)).isoformat()
         incoming = row('panel.Sale', sale.sync_id, total='2000')
@@ -445,9 +462,8 @@ class PushCollisionTests(SyncSetup):
         stats = apply_batch([incoming], is_pull=False, node_name='rep-1')
 
         sale.refresh_from_db()
-        self.assertEqual(sale.total, Decimal('2000'))
-        self.assertEqual(stats['conflicts'], 0)
-        self.assertFalse(SyncConflict.objects.filter(reason='stale_write').exists())
+        self.assertEqual(sale.total, Decimal('2000'))      # push still wins
+        self.assertEqual(stats['conflicts'], 1)
 
 
 class ReferenceIdentityTests(SyncSetup):
@@ -629,3 +645,192 @@ class CompositeIdentityTests(SyncSetup):
         self.inventory.refresh_from_db()
         self.assertEqual(str(self.inventory.sync_id), str(incoming_id))
         self.assertEqual(self.inventory.quantity, 9)
+
+
+class FullSalesSyncTests(SyncSetup):
+    """Sales, invoices, payments and returns are shared by every laptop: what the
+    manager adds or deletes reaches the salespeople on their next sync."""
+
+    def _manager_sale(self):
+        ids = [uuid.uuid4() for _ in range(4)]
+        sale_uid, item_uid, inv_uid, pay_uid = ids
+        client = Client.objects.create(name='Customer')
+        self.push('tok-mgr', [
+            row('panel.Sale', sale_uid, client=str(client.sync_id),
+                employee=str(self.employee.sync_id),
+                created_at='2026-09-01T10:00:00+00:00', total='4000'),
+            row('panel.SaleItem', item_uid, sale=str(sale_uid),
+                inventory=str(self.inventory.sync_id), quantity=2, price='2000'),
+            row('panel.Invoice', inv_uid, sale=str(sale_uid), total='4000',
+                status='partial', number='1000001',
+                created_at='2026-09-01T10:00:00+00:00'),
+            row('panel.InvoicePayment', pay_uid, invoice=str(inv_uid),
+                amount='1500', paid_at='2026-09-02T10:00:00+00:00'),
+        ])
+        return ids
+
+    def test_salesperson_receives_manager_sales(self):
+        ids = self._manager_sale()
+        data = self.pull('tok-sales').json()
+        received = {r['sync_id'] for r in data['changes'] if not r['is_deleted']}
+        for uid in ids:
+            self.assertIn(str(uid), received)
+
+    def test_manager_deletion_reaches_salesperson(self):
+        sale_uid = self._manager_sale()[0]
+        cursor = self.pull('tok-sales').json()['cursor']
+
+        self.push('tok-mgr', [row('panel.Sale', sale_uid, deleted=True)])
+
+        data = self.pull('tok-sales', cursor).json()
+        self.assertIn(('panel.Sale', str(sale_uid)),
+                      [(r['label'], r['sync_id']) for r in data['changes']
+                       if r['is_deleted']])
+
+    def test_pulled_sale_deletion_removes_the_whole_invoice(self):
+        # Laptop side: the Sale tombstone takes its items, invoice and payments.
+        sale = Sale.objects.create(total=Decimal('2000'))
+        item = SaleItem.objects.create(
+            sale=sale, inventory=self.inventory, quantity=2, price=Decimal('1000'))
+        invoice = Invoice.objects.create(sale=sale, total=Decimal('2000'))
+        payment = InvoicePayment.objects.create(invoice=invoice, amount=Decimal('500'))
+        self.inventory.refresh_from_db()
+        qty_before = self.inventory.quantity
+
+        apply_batch([row('panel.Sale', sale.sync_id, deleted=True)],
+                    is_pull=True, node_name='mgr-1')
+
+        self.assertFalse(Sale.objects.filter(pk=sale.pk).exists())
+        self.assertFalse(SaleItem.objects.filter(pk=item.pk).exists())
+        self.assertFalse(Invoice.objects.filter(pk=invoice.pk).exists())
+        self.assertFalse(InvoicePayment.objects.filter(pk=payment.pk).exists())
+        self.inventory.refresh_from_db()
+        # Stock comes down as the server's recomputed Inventory row instead.
+        self.assertEqual(self.inventory.quantity, qty_before)
+
+    def test_deletions_reach_salesperson_for_models_it_cannot_read(self):
+        # A rep's own expense deleted by the manager must leave the rep's laptop
+        # too, although expenses are never sent down.
+        exp_uid = uuid.uuid4()
+        self.push('tok-sales', [row('panel.Expense', exp_uid, description='Taxi',
+                                    amount='500', date='2026-08-10')])
+        cursor = self.pull('tok-sales').json()['cursor']
+
+        self.push('tok-mgr', [row('panel.Expense', exp_uid, deleted=True)])
+
+        data = self.pull('tok-sales', cursor).json()
+        self.assertEqual([(r['label'], r['is_deleted']) for r in data['changes']
+                          if r['label'] == 'panel.Expense'],
+                         [('panel.Expense', True)])
+
+
+class DeleteWinsTests(SyncSetup):
+    """A laptop that re-saves its old copy of a deleted sale (an edit, a return
+    recalculating the total) must not bring the sale back for everyone."""
+
+    def setUp(self):
+        super().setUp()
+        self.sale_uid = uuid.uuid4()
+        self.sale_row = row('panel.Sale', self.sale_uid,
+                            employee=str(self.employee.sync_id),
+                            created_at='2026-09-01T10:00:00+00:00', total='4000')
+        self.push('tok-sales', [self.sale_row])
+        self.push('tok-mgr', [row('panel.Sale', self.sale_uid, deleted=True)])
+
+    def test_stale_copy_is_not_restored(self):
+        data = self.push('tok-sales', [self.sale_row]).json()
+
+        self.assertTrue(data['ok'])
+        self.assertEqual(data['applied'], 0)
+        self.assertEqual(data['conflicts'], 1)
+        self.assertFalse(Sale.objects.filter(sync_id=self.sale_uid).exists())
+        self.assertTrue(SyncConflict.objects.filter(
+            sync_id=self.sale_uid, reason='stale_write').exists())
+
+    def test_refused_copy_gets_the_deletion_again(self):
+        # That laptop's cursor is already past the original deletion.
+        cursor = self.pull('tok-sales').json()['cursor']
+
+        self.push('tok-sales', [self.sale_row])
+
+        data = self.pull('tok-sales', cursor).json()
+        self.assertIn(('panel.Sale', str(self.sale_uid)),
+                      [(r['label'], r['sync_id']) for r in data['changes']
+                       if r['is_deleted']])
+
+
+class PullPolicyTests(SyncSetup):
+    """A laptop whose cursor was earned under an older policy (before sales were
+    sent to salespeople) gets everything resent once."""
+
+    def test_salesperson_on_old_policy_gets_everything_again(self):
+        cursor = self.pull('tok-sales').json()['cursor']
+
+        data = self.pull('tok-sales', cursor, policy='').json()
+
+        self.assertTrue(data['changes'])
+        self.assertEqual(data['policy'], registry.pull_policy('salesperson'))
+
+    def test_current_policy_stays_incremental(self):
+        first = self.pull('tok-sales', policy='').json()
+
+        data = self.pull('tok-sales', first['cursor'], policy=first['policy']).json()
+
+        self.assertEqual(data['changes'], [])
+
+    def test_laptop_without_policy_stays_incremental(self):
+        cursor = self.pull('tok-sales').json()['cursor']
+        self.assertEqual(self.pull('tok-sales', cursor).json()['changes'], [])
+
+    def test_manager_is_never_forced_to_resend(self):
+        cursor = self.pull('tok-mgr').json()['cursor']
+
+        data = self.pull('tok-mgr', cursor, policy='').json()
+
+        self.assertEqual(data['changes'], [])
+        self.assertEqual(data['policy'], '')
+
+    def test_version_bump_changes_the_fingerprint(self):
+        before = registry.pull_policy('salesperson')
+        with mock.patch.object(registry, 'PULL_POLICY_VERSION',
+                               registry.PULL_POLICY_VERSION + 1):
+            self.assertNotEqual(registry.pull_policy('salesperson'), before)
+
+
+class ClientPullPolicyTests(SyncSetup):
+    """Laptop side of the policy handshake (sync.client.pull)."""
+
+    def _serve(self, *responses):
+        sent = []
+
+        def fake_post(path, payload):
+            sent.append(payload)
+            return responses[len(sent) - 1]
+        return sent, mock.patch('sync.client._post', side_effect=fake_post)
+
+    def test_reports_and_stores_the_policy(self):
+        sent, patched = self._serve(
+            {'ok': True, 'changes': [], 'cursor': None, 'policy': 'abc'},
+            {'ok': True, 'changes': [], 'cursor': None, 'policy': 'abc'})
+        with patched:
+            client_pull()
+            client_pull()
+        self.assertEqual([p['policy'] for p in sent], ['', 'abc'])
+        self.assertEqual(SyncState.get().pull_policy, 'abc')
+
+    def test_old_server_leaves_the_policy_alone(self):
+        _, patched = self._serve({'ok': True, 'changes': [], 'cursor': None})
+        with patched:
+            client_pull()
+        self.assertEqual(SyncState.get().pull_policy, '')
+
+    def test_failed_apply_stores_neither_policy_nor_cursor(self):
+        bad = row('panel.Sale', uuid.uuid4(), total='not-a-number')
+        _, patched = self._serve({'ok': True, 'changes': [bad],
+                                  'cursor': '2026-09-01T10:00:00+00:00',
+                                  'policy': 'abc'})
+        with patched, self.assertRaises(Exception):
+            client_pull()
+        state = SyncState.get()
+        self.assertEqual(state.pull_policy, '')
+        self.assertIsNone(state.last_pull_cursor)

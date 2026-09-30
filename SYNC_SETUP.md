@@ -14,8 +14,9 @@ syncs:
 * **Manager** clicks **مزامنة البيانات (Sync Data)** → uploads admin changes and
   downloads the latest of everything.
 * **Salesperson** clicks **رفع بياناتي (Upload)** → uploads their new
-  sales/clients/payments and downloads read-only reference data (products,
-  stock, prices) — **never** purchase costs or other sensitive data.
+  sales/clients/payments and downloads every sale, invoice, payment and return
+  (whoever made them) plus products, stock and prices — **never** purchase
+  costs or other sensitive data.
 
 Nothing is duplicated (records are matched by a global `sync_id`), nothing is
 silently overwritten (conflicts are logged for review), and stock is
@@ -122,8 +123,8 @@ Encrypt certificate. HTTPS is required — tokens travel in request headers.
    SYNC_NODE_NAME=Ahmed-Laptop
    ```
 3. First run: open **مزامنة البيانات** → **Upload** once to download products,
-   stock and prices. Then work normally (offline is fine) and press **Upload**
-   whenever online to send new sales and refresh reference data.
+   stock, prices and sales. Then work normally (offline is fine) and press
+   **Upload** whenever online to send new sales and receive everyone else's.
 
 > Optional: automate syncing with cron (Linux/Mac) or Task Scheduler (Windows)
 > running `python manage.py sync` every few minutes while online.
@@ -137,6 +138,13 @@ Encrypt certificate. HTTPS is required — tokens travel in request headers.
 * **No clobbering:** if the server sends a record you edited locally but haven't
   uploaded yet, your local copy is kept and the difference is recorded as a
   **conflict** for review — never overwritten.
+* **Deletes stick:** a deletion reaches every laptop on its next sync. If a
+  laptop edits a record that was already deleted elsewhere (e.g. records a
+  return on a sale the manager deleted), the edit is refused and logged as a
+  conflict, and that laptop's copy is removed — the record never comes back.
+* **Catching up after an update:** when an update changes what a salesperson
+  may receive, each salesperson laptop downloads everything once on its next
+  sync (automatic; that first sync takes a little longer).
 * **Stock:** the server recomputes each batch's remaining quantity from the
   actual sales/returns/losses. If two reps sell the last unit, the second sale
   is accepted but flagged (`oversell`) and stock is clamped to zero, not left

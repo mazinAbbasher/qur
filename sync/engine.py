@@ -13,6 +13,8 @@ Guarantees (this is where "reliable, no duplicates, no clobbering" lives):
   An oversell is clamped to zero and logged, never left negative.
 * **Ordered + resilient FKs** — rows apply parents-first; a row whose foreign
   key isn't present yet is retried once, then logged as a missing reference.
+* **Deletes win** — a laptop pushing its stale copy of a row the server already
+  deleted doesn't bring it back; the copy is logged and the deletion re-sent.
 """
 
 from collections import defaultdict
@@ -27,7 +29,8 @@ from django.utils.dateparse import parse_datetime
 from .models import SyncConflict
 from .registry import SYNC_ORDER, get_spec, is_shared_writable, specs_for_pull
 from .serializers import (
-    field_map, get_model, model_label, scalar_fields, serialize_instance, _from_json,
+    field_map, fk_fields, get_model, model_label, scalar_fields, serialize_instance,
+    _from_json,
 )
 from .tracking import apply_guard
 
@@ -243,11 +246,31 @@ def _fill_stripped_required(obj, model, resolved):
 
 
 def _apply_row(label, row, *, is_pull, node_name, stats):
+    from .models import SyncTombstone
+
     model = get_model(label)
     fmap = field_map(model)
     sync_id = row['sync_id']
     incoming_fields = row.get('fields', {})
     incoming_deleted = bool(row.get('is_deleted', False))
+
+    # Delete wins. A pushed live copy of a row this server already deleted comes
+    # from a laptop that re-saved its copy (an edit, a return recalculating the
+    # total...) before it heard of the delete. Re-creating it would bring the
+    # record back for every node, often only half of it (a sale without its
+    # items). Refuse it, keep it in the conflict log, and re-announce the
+    # deletion so that laptop's next pull removes its copy.
+    if not is_pull and not incoming_deleted:
+        tombstone = SyncTombstone.objects.filter(
+            model_label=label, sync_id=sync_id).first()
+        if tombstone is not None:
+            _log_conflict('stale_write', label, sync_id,
+                          detail='Change to a record already deleted on the server; '
+                                 'not restored. The deletion was re-sent.',
+                          incoming=row, node_name=node_name)
+            tombstone.save()  # auto_now: newer than that laptop's cursor again
+            stats['conflicts'] += 1
+            return 'conflict', None
 
     resolved, unresolved = _resolve(model, incoming_fields)
     if unresolved:
@@ -300,7 +323,6 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
     # SET_NULL) rather than just flagging it — the app's list views don't filter
     # is_deleted, so a soft-deleted row would otherwise linger as a ghost.
     if incoming_deleted:  # existing is not None here (None handled above)
-        from .models import SyncTombstone
         inv_pks = _affected_inventory_pks(label, existing)
         existing.delete()
         # Record the deletion so it propagates to other nodes via pull.
@@ -323,8 +345,9 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
     obj.is_deleted = incoming_deleted
     obj.save()
     _apply_m2m(obj, model, incoming_fields)
-    # A live upsert clears any prior tombstone for this id (re-creation case).
-    from .models import SyncTombstone
+    # A live upsert clears any prior tombstone for this id. A push of a
+    # tombstoned id was refused above, so this is a pull of a row the server
+    # holds live.
     SyncTombstone.objects.filter(model_label=label, sync_id=sync_id).delete()
     stats['applied'] += 1
     return 'applied', obj
@@ -466,12 +489,13 @@ def collect_server_changes(role, since=None):
 
     rows = []
     max_ts = since
-    pull_specs = specs_for_pull(role)
-    readable = {spec.label for spec in pull_specs}
 
-    for spec in pull_specs:
+    for spec in specs_for_pull(role):
         model = get_model(spec.label)
-        qs = model.objects.all()
+        # Join the foreign keys serialize_instance reads; otherwise a full pull
+        # costs one query per key per row, which on a real sales history runs
+        # past the HTTP timeout.
+        qs = model.objects.select_related(*[f.name for f in fk_fields(model)])
         if since is not None:
             qs = qs.filter(sync_updated_at__gt=since)
         for inst in qs.order_by('sync_updated_at').iterator():
@@ -479,8 +503,10 @@ def collect_server_changes(role, since=None):
             if max_ts is None or inst.sync_updated_at > max_ts:
                 max_ts = inst.sync_updated_at
 
-    # Deletions the node hasn't seen yet (only for models it may read).
-    tomb_qs = SyncTombstone.objects.filter(model_label__in=readable)
+    # Deletions the node hasn't seen yet, for every model. A tombstone is only a
+    # label and a random id, so it reveals nothing, and a node can hold its own
+    # copy of a row it may not pull (a salesperson's expenses and exchanges).
+    tomb_qs = SyncTombstone.objects.all()
     if since is not None:
         tomb_qs = tomb_qs.filter(sync_updated_at__gt=since)
     for t in tomb_qs.order_by('sync_updated_at').iterator():

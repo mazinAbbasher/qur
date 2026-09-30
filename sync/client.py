@@ -141,13 +141,22 @@ def _clamped_cursor(server_cursor, deferred_min):
 def pull():
     state = SyncState.get()
     since = state.last_pull_cursor
-    data = _post('/sync/api/pull/', {'since': since.isoformat() if since else None})
+    data = _post('/sync/api/pull/', {
+        'since': since.isoformat() if since else None,
+        # If the server's policy differs, it resends everything (api_pull).
+        'policy': state.pull_policy,
+    })
     rows = data.get('changes', [])
     stats = apply_batch(rows, is_pull=True, node_name=getattr(settings, 'SYNC_NODE_NAME', ''))
     server_cursor = parse_datetime(data['cursor']) if data.get('cursor') else None
     cursor = _clamped_cursor(server_cursor, stats.get('deferred_min'))
     if cursor is not None:
         state.last_pull_cursor = cursor
+    # Saved together with the cursor: if applying failed above, neither is
+    # stored and the next pull gets the full resend again. A server too old
+    # to send a policy leaves ours as it was.
+    if 'policy' in data:
+        state.pull_policy = data['policy'] or ''
     state.last_pulled_at = timezone.now()
     state.save()
     stats['received'] = len(rows)
