@@ -663,6 +663,47 @@ class CommissionTests(SaleFormTestMixin, TestCase):
         zero.save()
         self.assertEqual(self._amount(sale, zero), Decimal('300'))
 
+    def _reassign(self, sale, employee):
+        item = sale.items.get()
+        data = self._data([self._row(self.inv_a, item.quantity, id=item.pk)], initial=1)
+        data['employee'] = employee.pk if employee else ''
+        return self.client.post(reverse('panel:sale_edit', args=[sale.pk]), data)
+
+    def test_moving_sale_moves_its_commission(self):
+        sale = self._sell(3)
+        other = Employee.objects.create(name='Other', commission_percentage=Decimal('5'))
+        self._reassign(sale, other)
+        self.assertEqual(self._amount(sale), Decimal('0'))
+        self.assertEqual(self._amount(sale, other), Decimal('300'))
+        month, year = sale.created_at.month, sale.created_at.year
+        self.assertEqual(self.employee.get_monthly_commission(month, year), Decimal('0'))
+        self.assertEqual(other.get_monthly_commission(month, year), Decimal('300'))
+
+    def test_removing_employee_drops_commission(self):
+        sale = self._sell(3)
+        self._reassign(sale, None)
+        self.assertEqual(self._amount(sale), Decimal('0'))
+
+    def test_paid_part_stays_with_old_employee(self):
+        # e.g. a salesperson laptop reassigns a sale whose commission was partly paid
+        sale = self._sell(3)
+        Commission.objects.filter(sale=sale).update(paid_amount=Decimal('100'))
+        other = Employee.objects.create(name='Other', commission_percentage=Decimal('5'))
+        sale.employee = other
+        sale.calculate_total()
+        old = Commission.objects.get(employee=self.employee, sale=sale)
+        self.assertEqual((old.amount, old.unpaid_amount), (Decimal('100'), Decimal('0')))
+        self.assertEqual(self._amount(sale, other), Decimal('300'))
+
+    def test_paid_commission_of_any_employee_blocks_delete(self):
+        sale = self._sell(3)
+        other = Employee.objects.create(name='Other', commission_percentage=Decimal('5'))
+        self._reassign(sale, other)
+        Commission.objects.filter(employee=self.employee, sale=sale).update(
+            amount=Decimal('100'), paid_amount=Decimal('100'))
+        self.client.post(reverse('panel:sale_delete', args=[sale.pk]))
+        self.assertTrue(Sale.objects.filter(pk=sale.pk).exists())
+
     @override_settings(SYNC_ROLE='salesperson')
     def test_salesperson_laptop_leaves_commissions_to_server(self):
         sale = Sale.objects.create(employee=self.employee, total=Decimal('1000'))
@@ -682,6 +723,11 @@ class BackfillCommissionsMigrationTests(TestCase):
         from django.apps import apps
         module = import_module('panel.migrations.0010_backfill_commissions')
         module.backfill_commissions(apps, None)
+
+    def _shrink_reassigned(self):
+        from django.apps import apps
+        module = import_module('panel.migrations.0011_reassigned_sale_commissions')
+        module.shrink_reassigned_commissions(apps, None)
 
     def _sale(self, total, when=None):
         return Sale.objects.create(employee=self.employee, total=Decimal(total),
@@ -705,6 +751,22 @@ class BackfillCommissionsMigrationTests(TestCase):
         self._backfill()
         self.assertEqual(Commission.objects.get(sale=stale).amount, Decimal('100'))
         self.assertEqual(Commission.objects.get(sale=paid).amount, Decimal('50'))
+
+    def test_moved_sale_no_longer_counts_for_old_employee(self):
+        other = Employee.objects.create(name='Other')
+        Employee.objects.filter(pk=other.pk).update(commission_percentage=Decimal('5'))
+        moved = self._sale('1000')
+        Commission.objects.create(employee=self.employee, sale=moved, amount=Decimal('100'))
+        paid = self._sale('1000')
+        Commission.objects.create(employee=self.employee, sale=paid,
+                                  amount=Decimal('100'), paid_amount=Decimal('30'))
+        Sale.objects.filter(pk__in=[moved.pk, paid.pk]).update(employee=other)
+        self._backfill()
+        self._shrink_reassigned()
+        self.assertEqual(Commission.objects.get(employee=self.employee, sale=moved).amount, Decimal('0'))
+        self.assertEqual(Commission.objects.get(employee=self.employee, sale=paid).amount, Decimal('30'))
+        self.assertEqual(Commission.objects.get(employee=other, sale=moved).amount, Decimal('50'))
+        self.assertEqual(self.employee.get_monthly_commission(5, 2026), Decimal('30'))
 
     def test_sale_without_employee_skipped(self):
         Sale.objects.create(total=Decimal('1000'))

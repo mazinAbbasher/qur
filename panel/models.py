@@ -554,7 +554,16 @@ def update_sale_commission(sale):
     sale pushed up from a laptop (see sync.engine) — a salesperson's sales
     arrive without one.
     """
-    if not sale.employee_id or not computes_commissions():
+    if not computes_commissions():
+        return
+    # A sale moved to another employee (or to none) no longer earns the old
+    # one a commission; only what was already paid to them stays theirs. The
+    # row is shrunk rather than deleted so the change syncs like any edit.
+    for stale in Commission.objects.filter(sale=sale).exclude(employee_id=sale.employee_id):
+        if stale.amount != stale.paid_amount:
+            stale.amount = stale.paid_amount
+            stale.save()
+    if not sale.employee_id:
         return
     employee = sale.employee
     amount = commission_for(sale.total, employee.commission_percentage)

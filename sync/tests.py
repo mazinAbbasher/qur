@@ -895,6 +895,15 @@ class PushedCommissionTests(SyncSetup):
         ])
         self.assertEqual(self._commission(sale_uid).amount, Decimal('150'))
 
+    def test_pushed_reassignment_moves_commission(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        other = Employee.objects.create(name='Rep Two', commission_percentage=Decimal('5'))
+        self.push('tok-sales', [row('panel.Sale', sale_uid, employee=str(other.sync_id))])
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('0'))
+        self.assertEqual(Commission.objects.get(employee=other, sale__sync_id=sale_uid).amount,
+                         Decimal('50'))
+
     def test_pull_leaves_commissions_to_the_server(self):
         apply_batch([row('panel.Sale', uuid.uuid4(), employee=str(self.employee.sync_id),
                          total='1000')], is_pull=True, node_name='mgr-1')

@@ -941,8 +941,8 @@ def sale_delete(request, pk):
         can_delete = False
         errors.append("لا يمكن حذف فاتورة تم سداد جزء منها. الرجاء حذف المدفوعات أولاً.")
 
-    commission = Commission.objects.filter(sale=sale).first()
-    if commission and commission.paid_amount > 0:
+    # Any employee's: a sale moved to another employee keeps the old one's paid part.
+    if Commission.objects.filter(sale=sale, paid_amount__gt=0).exists():
         can_delete = False
         errors.append("لا يمكن حذف فاتورة تم دفع عمولتها للمندوب.")
 
@@ -975,8 +975,7 @@ def sale_edit(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
     invoice = getattr(sale, 'invoice', None)
 
-    commission = Commission.objects.filter(sale=sale).first()
-    if commission and commission.paid_amount > 0:
+    if Commission.objects.filter(sale=sale, paid_amount__gt=0).exists():
         messages.error(request, "لا يمكن تعديل فاتورة تم دفع عمولتها جزئياً للمندوب. قم بإلغاء دفع العمولة أولا.")
         return redirect('panel:sale_detail', pk=sale.pk)
 
