@@ -10,7 +10,10 @@ from .models import (
 )
 from django.db import models
 from .forms import PartnerForm, PartnerTransactionForm, CurrencyPurchaseForm
-from panel.models import Shipment, SupplierPayment, Expense, CommissionPayment, InvoicePayment
+from panel.models import (
+    Shipment, SupplierPayment, Expense, CommissionPayment, InvoicePayment,
+    ManagerCommissionPayment,
+)
 from panel.permissions import is_manager
 from django.views.decorators.http import require_GET
 
@@ -32,6 +35,8 @@ def calculate_company_balance(currency):
         shipment_costs = Shipment.objects.all().aggregate(total=Sum('shipment_cost'))['total'] or 0
         expense_costs = Expense.objects.all().aggregate(total=Sum('amount'))['total'] or 0
         commission_sum = CommissionPayment.objects.all().aggregate(total=Sum('amount'))['total'] or 0 
+        # Managers' commissions are paid out of the same SDG cash as employees'.
+        commission_sum += ManagerCommissionPayment.objects.aggregate(total=Sum('amount'))['total'] or 0
         sale_payments = InvoicePayment.objects.all().aggregate(total=Sum('amount'))['total'] or 0
     else:
         expense_costs = 0

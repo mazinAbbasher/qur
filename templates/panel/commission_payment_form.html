@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-md-8">
+      <div class="card shadow">
+        <div class="card-header bg-info text-white">
+          <h5 class="mb-0 text-white">تعديل دفعة عمولة: {{ payee }}</h5>
+        </div>
+        <div class="card-body">
+          {% if messages %}
+            <ul class="messages">
+              {% for message in messages %}
+                <li class="alert alert-{{ message.tags }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+          <div class="mb-3 text-muted">
+            تاريخ الدفعة: {{ payment.paid_at|date:"Y-m-d H:i" }}
+            &nbsp;|&nbsp; المبلغ الحالي: {{ payment.amount|floatformat:2|intcomma }}
+          </div>
+          <form method="post" novalidate>
+            {% csrf_token %}
+            {% if form.errors %}
+              <div class="alert alert-danger">
+                {% for field in form %}
+                  {% for error in field.errors %}
+                    <div>{{ field.label }}: {{ error }}</div>
+                  {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                  <div>{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <div class="mb-3">
+              {{ form.amount.label_tag }} {{ form.amount }}
+              <div class="form-text">
+                أقصى مبلغ لفترة {{ year }}-{{ month|stringformat:"02d" }}: {{ room|floatformat:2|intcomma }}
+              </div>
+            </div>
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                {{ form.period_month.label_tag }} {{ form.period_month }}
+              </div>
+              <div class="col-md-6 mb-3">
+                {{ form.period_year.label_tag }} {{ form.period_year }}
+              </div>
+            </div>
+            <div class="mb-3">
+              {{ form.note.label_tag }} {{ form.note }}
+            </div>
+            <button class="btn btn-success" type="submit">حفظ التعديل</button>
+            <a href="{{ back_url }}" class="btn btn-secondary">إلغاء</a>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -85,6 +85,8 @@ MANAGER_ONLY_VIEWS = {
     'panel:sale_commissions',
     'panel:commission_pay',
     'panel:manager_commission_pay',
+    'panel:commission_payment_edit', 'panel:commission_payment_delete',
+    'panel:manager_commission_payment_edit', 'panel:manager_commission_payment_delete',
     'panel:get_employee_commission',
     # NOTE: expenses are intentionally NOT here — salespeople manage their own
     # daily field expenses (add/edit/delete/list/PDF). The company-wide expense

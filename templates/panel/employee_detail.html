@@ -83,6 +83,7 @@
                   <th class="px-4 py-2 text-right font-bold">التاريخ</th>
                   <th class="px-4 py-2 text-right font-bold">المبلغ</th>
                   <th class="px-4 py-2 text-right font-bold">ملاحظة</th>
+                  <th class="px-4 py-2 text-right font-bold">إجراءات</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-100">
@@ -91,10 +92,18 @@
                   <td class="px-4 py-2">{{ payment.paid_at|date:"Y-m-d H:i" }}</td>
                   <td class="px-4 py-2">{{ payment.amount|floatformat:2|intcomma }}</td>
                   <td class="px-4 py-2">{{ payment.note }}</td>
+                  <td class="px-4 py-2 whitespace-nowrap">
+                    <a href="{% url 'panel:commission_payment_edit' payment.pk %}" class="btn btn-sm btn-outline-primary mb-0">تعديل</a>
+                    <form method="post" action="{% url 'panel:commission_payment_delete' payment.pk %}" class="d-inline"
+                      onsubmit="return confirm('حذف دفعة العمولة هذه؟ سيعود مبلغها إلى العمولة غير المدفوعة.');">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-sm btn-outline-danger mb-0">حذف</button>
+                    </form>
+                  </td>
                 </tr>
                 {% empty %}
                 <tr>
-                  <td colspan="3" class="text-center text-muted py-4">لا توجد دفعات عمولة مسجلة.</td>
+                  <td colspan="4" class="text-center text-muted py-4">لا توجد دفعات عمولة مسجلة.</td>
                 </tr>
                 {% endfor %}
               </tbody>

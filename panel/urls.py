@@ -37,6 +37,8 @@ urlpatterns = [
     path('employees/<int:pk>/edit/', views.employee_edit, name='employee_edit'),
     path('employees/<int:pk>/delete/', views.employee_delete, name='employee_delete'),
     path('employees/<int:pk>/detail/', views.employee_detail, name='employee_detail'),
+    path('employees/commission-payments/<int:pk>/edit/', views.commission_payment_edit, name='commission_payment_edit'),
+    path('employees/commission-payments/<int:pk>/delete/', views.commission_payment_delete, name='commission_payment_delete'),
 
     # Client URLs
     path('clients/', views.client_list, name='client_list'),
@@ -111,6 +113,8 @@ urlpatterns = [
     path('managers/<int:pk>/delete/', views.manager_delete, name='manager_delete'),
     path('managers/<int:pk>/', views.manager_detail, name='manager_detail'),
     path("manager_commission_pay/<int:manager_id>/", views.manager_commission_pay, name="manager_commission_pay"),  
+    path('managers/commission-payments/<int:pk>/edit/', views.manager_commission_payment_edit, name='manager_commission_payment_edit'),
+    path('managers/commission-payments/<int:pk>/delete/', views.manager_commission_payment_delete, name='manager_commission_payment_delete'),
 
     # System update (git pull + requirements + migrate, run in the background)
     path('system/update/', views.system_update, name='system_update'),

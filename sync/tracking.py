@@ -53,6 +53,17 @@ def enqueue(label, sync_id, deleted=False):
     )
 
 
+def record_server_deletion(instance):
+    """On the server, record a row deleted outside sync apply (from its own
+    pages) as a tombstone. Tracking only queues a laptop's own deletions, so
+    without this the laptops would never hear of it."""
+    if getattr(settings, 'SYNC_ROLE', 'standalone') != 'server' or sync_apply_active():
+        return
+    from .models import SyncTombstone
+    SyncTombstone.objects.update_or_create(
+        model_label=model_label(type(instance)), sync_id=instance.sync_id)
+
+
 def _on_save(sender, instance, **kwargs):
     if sync_apply_active() or not _tracking_enabled():
         return

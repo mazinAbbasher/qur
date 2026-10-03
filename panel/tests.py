@@ -19,10 +19,10 @@ from django.urls import reverse
 
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
-    Commission, CommissionPayment, Employee, Inventory, Invoice, InvoicePayment, Product,
-    ReturnedProduct, Sale, SaleItem, Shipment,
+    Commission, CommissionPayment, Employee, Inventory, Invoice, InvoicePayment, Manager,
+    ManagerCommissionPayment, Product, ReturnedProduct, Sale, SaleItem, Shipment,
 )
-from sync.models import SyncOutbox
+from sync.models import SyncOutbox, SyncTombstone
 from sync.tracking import apply_guard
 from panel.permissions import MANAGER_GROUP, SALESPERSON_GROUP
 
@@ -893,3 +893,412 @@ class ReallocatePaymentsMigrationTests(TestCase):
         Commission.objects.filter(pk=self.commissions[5].pk).update(paid_amount=Decimal('150000'))
         self._run()
         self.assertEqual((self.paid(5), self.paid(9)), (Decimal('150000'), Decimal('100000')))
+
+
+class _CommissionPaymentPagesMixin:
+    """A logged-in manager and a 10% employee with June (300000 commission)
+    and September (500000) sales."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.manager_user = User.objects.create_user('boss', password='pw12345!x')
+        self.manager_user.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.client.force_login(self.manager_user)
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.june = Sale.objects.create(employee=self.employee, total=Decimal('3000000'),
+                                        created_at=_local(2026, 6, 10))
+        self.september = Sale.objects.create(employee=self.employee, total=Decimal('5000000'),
+                                             created_at=_local(2026, 9, 10))
+        self.employee.recalculate_commissions()
+
+    def login_salesperson(self):
+        rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+        self.client.force_login(rep)
+
+
+@override_settings(SYNC_ROLE='server')
+class CommissionPaymentEditDeleteTests(_CommissionPaymentPagesMixin, TestCase):
+    """Editing or deleting an employee's commission payment takes exactly its
+    own share back out of the commissions it paid."""
+
+    def commission(self, sale):
+        return Commission.objects.get(employee=self.employee, sale=sale)
+
+    def unpaid(self, month):
+        return self.employee.get_unpaid_commission(month=month, year=2026)
+
+    def pay(self, amount, month):
+        return CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal(amount), period_month=month, period_year=2026)
+
+    def edit(self, payment, amount, month, note='', balance='1e9'):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal(balance)):
+            return self.client.post(reverse('panel:commission_payment_edit', args=[payment.pk]), {
+                'amount': amount, 'period_month': month, 'period_year': 2026, 'note': note})
+
+    def delete(self, payment):
+        return self.client.post(reverse('panel:commission_payment_delete', args=[payment.pk]))
+
+    def split(self, payment):
+        payment.refresh_from_db()
+        return {sale_id: Decimal(v) for sale_id, v in payment.allocations.items()}
+
+    # --- the recorded split ---------------------------------------------------
+
+    def test_payment_records_its_split(self):
+        payment = self.pay('500000', 9)
+        self.assertEqual(self.split(payment), {str(self.september.sync_id): Decimal('500000')})
+
+    def test_leftover_split_names_each_commission(self):
+        payment = self.pay('600000', 9)
+        self.assertEqual(self.split(payment), {str(self.september.sync_id): Decimal('500000'),
+                                               str(self.june.sync_id): Decimal('100000')})
+
+    # --- delete -------------------------------------------------------------
+
+    def test_delete_restores_unpaid_and_company_balance(self):
+        from finance.models import Currency
+        from finance.views import calculate_company_balance
+        sdg = Currency.objects.get(code='SDG')
+        payment = self.pay('500000', 9)
+        balance = calculate_company_balance(sdg)
+        resp = self.delete(payment)
+        self.assertRedirects(resp, reverse('panel:employee_detail', args=[self.employee.pk])
+                             + '?month=9&year=2026', fetch_redirect_response=False)
+        self.assertFalse(CommissionPayment.objects.exists())
+        self.assertEqual(self.unpaid(9), Decimal('500000'))
+        self.assertEqual(calculate_company_balance(sdg), balance + Decimal('500000'))
+
+    def test_delete_takes_back_only_its_own_share(self):
+        first = self.pay('200000', 9)
+        self.pay('100000', 9)
+        self.delete(first)
+        self.assertEqual(self.commission(self.september).paid_amount, Decimal('100000'))
+        self.assertEqual(self.unpaid(9), Decimal('400000'))
+
+    def test_delete_of_leftover_payment_restores_both_months(self):
+        payment = self.pay('600000', 9)  # 500000 to September, 100000 to June
+        self.delete(payment)
+        self.assertEqual((self.unpaid(6), self.unpaid(9)), (Decimal('300000'), Decimal('500000')))
+
+    def test_delete_after_commission_shrank_never_goes_negative(self):
+        payment = self.pay('500000', 9)
+        Commission.objects.filter(sale=self.september).update(amount=Decimal('400000'))  # a return
+        self.delete(payment)
+        commission = self.commission(self.september)
+        self.assertEqual((commission.paid_amount, commission.unpaid_amount),
+                         (Decimal('0'), Decimal('400000')))
+
+    def test_delete_requires_post(self):
+        payment = self.pay('500000', 9)
+        self.assertEqual(self.client.get(
+            reverse('panel:commission_payment_delete', args=[payment.pk])).status_code, 405)
+        self.assertTrue(CommissionPayment.objects.filter(pk=payment.pk).exists())
+
+    def test_payment_made_before_splits_were_kept_is_taken_back_from_its_links(self):
+        commission = self.commission(self.june)
+        with apply_guard():  # as the old code left it: no split, just the link
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal('300000'), paid_at=_local(2026, 6, 20))
+        Commission.objects.filter(pk=commission.pk).update(paid_amount=Decimal('300000'))
+        payment.commissions.add(commission)
+        self.delete(payment)
+        self.assertEqual(self.unpaid(6), Decimal('300000'))
+
+    # --- edit ---------------------------------------------------------------
+
+    def test_edit_page_shows_the_most_it_can_pay(self):
+        payment = self.pay('200000', 9)
+        resp = self.client.get(reverse('panel:commission_payment_edit', args=[payment.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '500,000.00')  # 300000 still unpaid + its own 200000
+        # Nothing was taken back by showing it.
+        self.assertEqual(self.unpaid(9), Decimal('300000'))
+
+    def test_edit_lower_amount(self):
+        payment = self.pay('500000', 9)
+        resp = self.edit(payment, '300000', 9)
+        self.assertRedirects(resp, reverse('panel:employee_detail', args=[self.employee.pk])
+                             + '?month=9&year=2026', fetch_redirect_response=False)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('300000'))
+        self.assertEqual(self.unpaid(9), Decimal('200000'))
+        self.assertEqual(self.split(payment), {str(self.september.sync_id): Decimal('300000')})
+
+    def test_edit_higher_amount_within_the_month(self):
+        payment = self.pay('300000', 9)
+        self.edit(payment, '500000', 9)
+        self.assertEqual(self.unpaid(9), Decimal('0'))
+        self.assertEqual(self.unpaid(6), Decimal('300000'))
+
+    def test_edit_over_the_months_unpaid_refused(self):
+        payment = self.pay('500000', 9)
+        resp = self.edit(payment, '600000', 9)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.errors(resp), [
+            'المبلغ أكبر من العمولة غير المدفوعة لفترة 2026-09 (500000.00).'])
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('500000'))
+        self.assertEqual((self.unpaid(6), self.unpaid(9)), (Decimal('300000'), Decimal('0')))
+
+    def test_edit_increase_needs_company_balance(self):
+        payment = self.pay('300000', 9)
+        self.edit(payment, '500000', 9, balance='100000')  # the extra 200000 isn't there
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('300000'))
+        self.assertEqual(self.unpaid(9), Decimal('200000'))
+
+    def test_edit_decrease_needs_no_balance(self):
+        payment = self.pay('300000', 9)
+        self.edit(payment, '100000', 9, balance='0')
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('100000'))
+
+    def test_edit_moves_payment_to_another_month(self):
+        payment = self.pay('300000', 9)
+        resp = self.edit(payment, '300000', 6)
+        self.assertRedirects(resp, reverse('panel:employee_detail', args=[self.employee.pk])
+                             + '?month=6&year=2026', fetch_redirect_response=False)
+        self.assertEqual((self.unpaid(6), self.unpaid(9)), (Decimal('0'), Decimal('500000')))
+        payment.refresh_from_db()
+        self.assertEqual((payment.period_month, payment.period_year), (6, 2026))
+        self.assertEqual(list(payment.commissions.all()), [self.commission(self.june)])
+
+    def test_note_edit_leaves_the_split_alone(self):
+        payment = self.pay('500000', 9)
+        stamp = self.commission(self.september).sync_updated_at
+        self.edit(payment, '500000', 9, note='cash')
+        payment.refresh_from_db()
+        self.assertEqual(payment.note, 'cash')
+        self.assertEqual(self.commission(self.september).sync_updated_at, stamp)
+
+    def test_note_edit_of_payment_without_period_keeps_it_that_way(self):
+        commission = self.commission(self.june)
+        with apply_guard():
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal('300000'), paid_at=_local(2026, 6, 20))
+        Commission.objects.filter(pk=commission.pk).update(paid_amount=Decimal('300000'))
+        payment.commissions.add(commission)
+        self.edit(payment, '300000', 6, note='cash')  # the form shows June, its paid month
+        payment.refresh_from_db()
+        self.assertEqual((payment.note, payment.period_month), ('cash', None))
+        self.assertEqual(self.unpaid(6), Decimal('0'))
+
+    def test_invalid_amount_refused(self):
+        payment = self.pay('500000', 9)
+        for amount in ('0', '-5', 'abc'):
+            resp = self.edit(payment, amount, 9)
+            self.assertEqual(resp.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('500000'))
+
+    def errors(self, resp):
+        return [str(m) for m in get_messages(resp.wsgi_request) if m.level_tag == 'error']
+
+    # --- pages & access -----------------------------------------------------
+
+    def test_detail_page_offers_edit_and_delete(self):
+        payment = self.pay('500000', 9)
+        resp = self.client.get(reverse('panel:employee_detail', args=[self.employee.pk]),
+                               {'month': 9, 'year': 2026})
+        self.assertContains(resp, reverse('panel:commission_payment_edit', args=[payment.pk]))
+        self.assertContains(resp, reverse('panel:commission_payment_delete', args=[payment.pk]))
+
+    def test_salesperson_cannot_edit_or_delete(self):
+        payment = self.pay('500000', 9)
+        self.login_salesperson()
+        edit_url = reverse('panel:commission_payment_edit', args=[payment.pk])
+        self.assertRedirects(self.client.get(edit_url), reverse('panel:sale_list'),
+                             fetch_redirect_response=False)
+        self.client.post(edit_url, {'amount': '1', 'period_month': 9, 'period_year': 2026})
+        self.delete(payment)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('500000'))
+        self.assertEqual(self.unpaid(9), Decimal('0'))
+
+
+@override_settings(SYNC_ROLE='server')
+class ManagerCommissionPaymentEditDeleteTests(_CommissionPaymentPagesMixin, TestCase):
+    """A manager earns 2% of their employees' sales: 100000 for September."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = Manager.objects.create(name='Boss', commission_percentage=Decimal('2'))
+        self.boss.employees.add(self.employee)
+
+    def pay(self, amount, month=9):
+        return ManagerCommissionPayment.objects.create(
+            manager=self.boss, amount=Decimal(amount), period_month=month, period_year=2026)
+
+    def edit(self, payment, amount, month=9, note='', balance='1e9'):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal(balance)):
+            return self.client.post(
+                reverse('panel:manager_commission_payment_edit', args=[payment.pk]),
+                {'amount': amount, 'period_month': month, 'period_year': 2026, 'note': note})
+
+    def pay_view(self, amount, balance='1e9'):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal(balance)):
+            return self.client.post(reverse('panel:manager_commission_pay', args=[self.boss.pk]),
+                                    {'amount': amount, 'period_month': 9, 'period_year': 2026})
+
+    def sdg_balance(self):
+        from finance.models import Currency
+        from finance.views import calculate_company_balance
+        return calculate_company_balance(Currency.objects.get(code='SDG'))
+
+    def amount_of(self, payment):
+        payment.refresh_from_db()
+        return payment.amount
+
+    def test_edit_within_unpaid(self):
+        payment = self.pay('60000')
+        resp = self.edit(payment, '100000', note='rest')
+        self.assertRedirects(resp, reverse('panel:manager_detail', args=[self.boss.pk])
+                             + '?month=9&year=2026', fetch_redirect_response=False)
+        self.assertEqual(self.amount_of(payment), Decimal('100000'))
+        self.assertEqual(payment.note, 'rest')
+
+    def test_edit_over_unpaid_refused(self):
+        payment = self.pay('60000')
+        self.pay('30000')
+        self.edit(payment, '70001')  # only 70000 is left besides the other payment
+        self.assertEqual(self.amount_of(payment), Decimal('60000'))
+
+    def test_edit_to_month_without_commission_refused(self):
+        payment = self.pay('60000')
+        self.edit(payment, '60000', month=7)
+        payment.refresh_from_db()
+        self.assertEqual((payment.period_month, payment.amount), (9, Decimal('60000')))
+
+    def test_edit_moves_payment_to_another_month(self):
+        payment = self.pay('60000')  # June's commission is 60000 too (2% of 3000000)
+        self.edit(payment, '60000', month=6)
+        payment.refresh_from_db()
+        self.assertEqual(payment.period_month, 6)
+
+    def test_edit_page_renders(self):
+        payment = self.pay('60000')
+        resp = self.client.get(reverse('panel:manager_commission_payment_edit', args=[payment.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, '100,000.00')  # 40000 still unpaid + its own 60000
+
+    def test_delete(self):
+        payment = self.pay('60000')
+        resp = self.client.post(reverse('panel:manager_commission_payment_delete', args=[payment.pk]))
+        self.assertRedirects(resp, reverse('panel:manager_detail', args=[self.boss.pk])
+                             + '?month=9&year=2026', fetch_redirect_response=False)
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+
+    def test_detail_page_offers_edit_and_delete(self):
+        payment = self.pay('60000')
+        resp = self.client.get(reverse('panel:manager_detail', args=[self.boss.pk]),
+                               {'month': 9, 'year': 2026})
+        self.assertContains(resp, reverse('panel:manager_commission_payment_edit', args=[payment.pk]))
+        self.assertContains(resp, reverse('panel:manager_commission_payment_delete', args=[payment.pk]))
+
+    def test_pay_view_still_checks_unpaid(self):
+        self.pay_view('100001')
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+        self.pay_view('100000')
+        self.assertEqual(ManagerCommissionPayment.objects.get().amount, Decimal('100000'))
+
+    # --- a cost paid out of the company's SDG cash ----------------------------
+
+    def test_payments_come_out_of_the_sdg_balance(self):
+        from finance.models import Currency
+        from finance.views import calculate_company_balance
+        usd = Currency.objects.get(code='USD')
+        before, usd_before = self.sdg_balance(), calculate_company_balance(usd)
+        payment = self.pay('60000')
+        self.assertEqual(self.sdg_balance(), before - Decimal('60000'))
+        self.assertEqual(calculate_company_balance(usd), usd_before)
+        self.client.post(reverse('panel:manager_commission_payment_delete', args=[payment.pk]))
+        self.assertEqual(self.sdg_balance(), before)
+
+    def test_edit_moves_the_balance_by_the_difference(self):
+        payment = self.pay('60000')
+        before = self.sdg_balance()
+        self.edit(payment, '100000')
+        self.assertEqual(self.sdg_balance(), before - Decimal('40000'))
+
+    def test_pay_view_needs_company_balance(self):
+        resp = self.pay_view('60000', balance='59999.99')
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+        self.assertEqual(
+            [str(m) for m in get_messages(resp.wsgi_request) if m.level_tag == 'error'],
+            ['الرصيد الحالي للجنيه السوداني (59999.99) غير كافٍ لتغطية العمولة (60000).'])
+        self.pay_view('60000', balance='60000')
+        self.assertEqual(ManagerCommissionPayment.objects.get().amount, Decimal('60000'))
+
+    def test_edit_increase_needs_company_balance(self):
+        payment = self.pay('60000')
+        self.edit(payment, '100000', balance='39999.99')  # the extra 40000 isn't there
+        self.assertEqual(self.amount_of(payment), Decimal('60000'))
+        self.edit(payment, '100000', balance='40000')
+        self.assertEqual(self.amount_of(payment), Decimal('100000'))
+
+    def test_edit_decrease_needs_no_balance(self):
+        payment = self.pay('60000')
+        self.edit(payment, '10000', balance='0')
+        self.assertEqual(self.amount_of(payment), Decimal('10000'))
+
+    def test_salesperson_cannot_edit_or_delete(self):
+        payment = self.pay('60000')
+        self.login_salesperson()
+        self.edit(payment, '1')
+        self.client.post(reverse('panel:manager_commission_payment_delete', args=[payment.pk]))
+        self.assertEqual(self.amount_of(payment), Decimal('60000'))
+
+
+@override_settings(SYNC_ROLE='server')
+class RecordAllocationsMigrationTests(TestCase):
+    def setUp(self):
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.commissions = {}
+        for month, total in ((6, '3000000'), (9, '5000000')):
+            sale = Sale.objects.create(employee=self.employee, total=Decimal(total),
+                                       created_at=_local(2026, month, 10))
+            self.commissions[month] = Commission.objects.create(
+                employee=self.employee, sale=sale, amount=Decimal(total) / 10,
+                created_at=sale.created_at)
+
+    def _record(self, amount, paid, period=None, when=None):
+        """A payment as the old code left it: no split, ``paid`` month -> amount."""
+        with apply_guard():
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal(amount), period_month=period,
+                period_year=2026 if period else None, paid_at=when or _local(2026, 9, 20))
+        for month, value in paid.items():
+            c = self.commissions[month]
+            c.paid_amount += Decimal(value)
+            c.save()
+            payment.commissions.add(c)
+        return payment
+
+    def _run(self):
+        _run_migration('0014_record_commission_payment_allocations', 'record_allocations')
+
+    def test_split_recorded_and_payment_then_deletes_exactly(self):
+        legacy = self._record('300000', {6: '300000'}, when=_local(2026, 6, 20))
+        september = self._record('200000', {9: '200000'}, period=9)
+        self._run()
+        legacy.refresh_from_db()
+        september.refresh_from_db()
+        june_sale, sept_sale = (str(self.commissions[m].sale.sync_id) for m in (6, 9))
+        self.assertEqual(legacy.allocations, {june_sale: '300000.00'})
+        self.assertEqual(september.allocations, {sept_sale: '200000.00'})
+        september.delete()
+        self.commissions[9].refresh_from_db()
+        self.commissions[6].refresh_from_db()
+        self.assertEqual((self.commissions[6].paid_amount, self.commissions[9].paid_amount),
+                         (Decimal('300000'), Decimal('0')))
+
+    def test_inconsistent_employee_keeps_empty_split(self):
+        payment = self._record('200000', {9: '200000'}, period=9)
+        Commission.objects.filter(pk=self.commissions[6].pk).update(paid_amount=Decimal('5000'))
+        self._run()
+        payment.refresh_from_db()
+        self.assertEqual(payment.allocations, {})
+        self.commissions[6].refresh_from_db()
+        self.assertEqual(self.commissions[6].paid_amount, Decimal('5000'))

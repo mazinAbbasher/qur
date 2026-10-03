@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.contrib import messages
 from django.core.paginator import Paginator
 from datetime import timedelta  # <-- Add this import
+from decimal import Decimal
 from .models import (
     Expense, Product, Invoice, Sale, SaleItem, Client, Employee,
     ExchangeRate, Area, Shipment, Commission, Inventory, InvoicePayment,
@@ -2461,6 +2462,128 @@ def commission_pay(request, employee_id):
     messages.success(request, f"تم تسجيل دفعة عمولة بمبلغ {amount} بنجاح.")
     return redirect(redirect_url)
 
+
+class CommissionPaymentForm(forms.Form):
+    """Edit a recorded commission payment (an employee's or a manager's)."""
+    amount = forms.DecimalField(
+        label="المبلغ", max_digits=12, decimal_places=2, min_value=Decimal('0.01'),
+        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01', 'min': '0.01'}),
+    )
+    period_month = forms.TypedChoiceField(
+        label="شهر العمولة", coerce=int, choices=[(m, f"{m:02d}") for m in range(1, 13)],
+        widget=forms.Select(attrs={'class': 'form-select'}),
+    )
+    period_year = forms.IntegerField(
+        label="سنة العمولة", min_value=2000, max_value=2100,
+        widget=forms.NumberInput(attrs={'class': 'form-control'}),
+    )
+    note = forms.CharField(
+        label="ملاحظة", max_length=255, required=False,
+        widget=forms.TextInput(attrs={'class': 'form-control'}),
+    )
+
+
+def _payment_period(payment):
+    """(month, year) a commission payment counts for. One recorded before
+    periods existed counts for the month it was paid in (as the detail pages
+    list it)."""
+    if payment.period_month and payment.period_year:
+        return payment.period_month, payment.period_year
+    paid_at = timezone.localtime(payment.paid_at)
+    return paid_at.month, paid_at.year
+
+
+def _payment_form_changes(form, payment):
+    """The edited (amount, month, year), and whether they differ from what
+    ``payment`` pays now."""
+    data = form.cleaned_data
+    edited = (data['amount'], data['period_month'], data['period_year'])
+    return edited, edited != (payment.amount, *_payment_period(payment))
+
+
+def _commission_payment_edit_error(payment, amount, room, month, year):
+    """Why ``payment`` can't be changed to ``amount`` for month/year (None if
+    it can): it may pay at most ``room`` there, and any increase comes out of
+    the company's SDG cash."""
+    if amount > room:
+        return f"المبلغ أكبر من العمولة غير المدفوعة لفترة {year}-{month:02d} ({room})."
+    if amount > payment.amount:
+        increase = amount - payment.amount
+        balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+        if balance < increase:
+            return (f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية "
+                    f"زيادة العمولة ({increase}).")
+    return None
+
+
+def _commission_payment_room(payment, month, year):
+    """The most ``payment`` could pay into month/year: that period's unpaid
+    commission once the payment itself is taken back out (tried, then undone)."""
+    from django.db import transaction
+    from .models import CommissionPayment
+    with transaction.atomic():
+        CommissionPayment.objects.get(pk=payment.pk)._release()
+        room = payment.employee.get_unpaid_commission(month=month, year=year)
+        transaction.set_rollback(True)
+    return room
+
+
+def commission_payment_edit(request, pk):
+    from .models import CommissionPayment
+    payment = get_object_or_404(CommissionPayment.objects.select_related('employee'), pk=pk)
+    employee = payment.employee
+    month, year = _payment_period(payment)
+    if request.method == 'POST':
+        form = CommissionPaymentForm(request.POST)
+        if form.is_valid():
+            (amount, new_month, new_year), changed = _payment_form_changes(form, payment)
+            error = None
+            if changed:
+                room = _commission_payment_room(payment, new_month, new_year)
+                error = _commission_payment_edit_error(payment, amount, room, new_month, new_year)
+            if error:
+                messages.error(request, error)
+            else:
+                payment.note = form.cleaned_data['note']
+                if changed:
+                    # save() takes the old amount back out of the commissions it
+                    # paid and distributes the new one over the new period.
+                    payment.amount = amount
+                    payment.period_month, payment.period_year = new_month, new_year
+                payment.save()
+                messages.success(request, "تم تعديل دفعة العمولة بنجاح.")
+                return redirect(f"{reverse('panel:employee_detail', args=[employee.pk])}"
+                                f"?month={new_month}&year={new_year}")
+    else:
+        form = CommissionPaymentForm(initial={
+            'amount': payment.amount, 'period_month': month, 'period_year': year,
+            'note': payment.note,
+        })
+    return render(request, 'panel/commission_payment_form.html', {
+        'form': form,
+        'payment': payment,
+        'payee': employee.name,
+        'room': _commission_payment_room(payment, month, year),
+        'month': month,
+        'year': year,
+        'back_url': f"{reverse('panel:employee_detail', args=[employee.pk])}?month={month}&year={year}",
+        "active_sidebar": "employees",
+    })
+
+
+@require_POST
+def commission_payment_delete(request, pk):
+    from .models import CommissionPayment
+    payment = get_object_or_404(CommissionPayment.objects.select_related('employee'), pk=pk)
+    employee = payment.employee
+    month, year = _payment_period(payment)
+    amount = payment.amount
+    # delete() takes the amount back out of the commissions it paid, so they
+    # show as unpaid again (and the company balance gets it back).
+    payment.delete()
+    messages.success(request, f"تم حذف دفعة العمولة بمبلغ {amount}.")
+    return redirect(f"{reverse('panel:employee_detail', args=[employee.pk])}?month={month}&year={year}")
+
 def client_detail(request, pk):
     client = get_object_or_404(Client, pk=pk)
     invoices = (
@@ -3040,7 +3163,28 @@ def manager_commission_pay(request, manager_id):
     except Exception:
         messages.error(request, "المبلغ غير صالح.")
         return redirect(redirect_url)
-    # Get total sales for manager's employees in the selected period
+    unpaid_commission = _manager_unpaid_commission(manager, month, year)
+    if amount <= 0 or amount > unpaid_commission:
+        messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
+        return redirect(redirect_url)
+    # Paid out of the company's SDG cash, like an employee's commission.
+    balance = calculate_company_balance(Currency.objects.get(code='SDG'))
+    if balance < amount:
+        messages.error(request, f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية العمولة ({amount}).")
+        return redirect(redirect_url)
+    ManagerCommissionPayment.objects.create(
+        manager=manager, amount=amount, note=note,
+        period_month=month, period_year=year,
+    )
+    messages.success(request, f"تم تسجيل دفعة عمولة للمدير بمبلغ {amount} بنجاح.")
+    return redirect(redirect_url)
+
+
+def _manager_unpaid_commission(manager, month, year, exclude=None):
+    """The manager's unpaid commission for month/year: their share of their
+    employees' sales that month, less what was paid for it (leaving the
+    payment ``exclude`` out, when given)."""
+    from .models import ManagerCommissionPayment
     employees = manager.employees.all()
     sales = Sale.objects.filter(employee__in=employees, created_at__year=year, created_at__month=month)
     total_sales = sales.aggregate(total=models.Sum('total'))['total'] or Decimal('0')
@@ -3052,17 +3196,63 @@ def manager_commission_pay(request, manager_id):
             | Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month)
         )
     )
+    if exclude is not None:
+        commission_payments = commission_payments.exclude(pk=exclude.pk)
     paid_total = commission_payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0')
-    unpaid_commission = commission_amount - paid_total
-    if amount <= 0 or amount > unpaid_commission:
-        messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
-        return redirect(redirect_url)
-    ManagerCommissionPayment.objects.create(
-        manager=manager, amount=amount, note=note,
-        period_month=month, period_year=year,
-    )
-    messages.success(request, f"تم تسجيل دفعة عمولة للمدير بمبلغ {amount} بنجاح.")
-    return redirect(redirect_url)
+    return commission_amount - paid_total
+
+
+def manager_commission_payment_edit(request, pk):
+    from .models import ManagerCommissionPayment
+    payment = get_object_or_404(ManagerCommissionPayment.objects.select_related('manager'), pk=pk)
+    manager = payment.manager
+    month, year = _payment_period(payment)
+    if request.method == 'POST':
+        form = CommissionPaymentForm(request.POST)
+        if form.is_valid():
+            (amount, new_month, new_year), changed = _payment_form_changes(form, payment)
+            error = None
+            if changed:
+                room = _manager_unpaid_commission(manager, new_month, new_year, exclude=payment)
+                error = _commission_payment_edit_error(payment, amount, room, new_month, new_year)
+            if error:
+                messages.error(request, error)
+            else:
+                payment.note = form.cleaned_data['note']
+                if changed:
+                    payment.amount = amount
+                    payment.period_month, payment.period_year = new_month, new_year
+                payment.save()
+                messages.success(request, "تم تعديل دفعة العمولة بنجاح.")
+                return redirect(f"{reverse('panel:manager_detail', args=[manager.pk])}"
+                                f"?month={new_month}&year={new_year}")
+    else:
+        form = CommissionPaymentForm(initial={
+            'amount': payment.amount, 'period_month': month, 'period_year': year,
+            'note': payment.note,
+        })
+    return render(request, 'panel/commission_payment_form.html', {
+        'form': form,
+        'payment': payment,
+        'payee': manager.name,
+        'room': _manager_unpaid_commission(manager, month, year, exclude=payment),
+        'month': month,
+        'year': year,
+        'back_url': f"{reverse('panel:manager_detail', args=[manager.pk])}?month={month}&year={year}",
+        "active_sidebar": "managers",
+    })
+
+
+@require_POST
+def manager_commission_payment_delete(request, pk):
+    from .models import ManagerCommissionPayment
+    payment = get_object_or_404(ManagerCommissionPayment.objects.select_related('manager'), pk=pk)
+    manager = payment.manager
+    month, year = _payment_period(payment)
+    amount = payment.amount
+    payment.delete()
+    messages.success(request, f"تم حذف دفعة العمولة بمبلغ {amount}.")
+    return redirect(f"{reverse('panel:manager_detail', args=[manager.pk])}?month={month}&year={year}")
 
 
 # --- System update (pull the latest version from GitHub) --------------------

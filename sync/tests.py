@@ -17,13 +17,14 @@ from django.utils.dateparse import parse_datetime
 
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
-    Client, Commission, Employee, Expense, Inventory, Invoice, InvoicePayment,
-    Product, Sale, SaleItem, Shipment, ReturnedProduct,
+    Client, Commission, CommissionPayment, Employee, Expense, Inventory, Invoice,
+    InvoicePayment, Manager, ManagerCommissionPayment, Product, Sale, SaleItem, Shipment,
+    ReturnedProduct,
 )
 from sync import registry
 from sync.client import _clamped_cursor, pull as client_pull
 from sync.engine import apply_batch
-from sync.models import Node, SyncConflict, SyncOutbox, SyncState
+from sync.models import Node, SyncConflict, SyncOutbox, SyncState, SyncTombstone
 from sync.serializers import serialize_instance
 
 
@@ -908,3 +909,90 @@ class PushedCommissionTests(SyncSetup):
         apply_batch([row('panel.Sale', uuid.uuid4(), employee=str(self.employee.sync_id),
                          total='1000')], is_pull=True, node_name='mgr-1')
         self.assertFalse(Commission.objects.exists())
+
+
+class CommissionPaymentSyncTests(SyncSetup):
+    """Edited and deleted commission payments reach every manager laptop, and
+    no node takes a payment back out of the commissions twice."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.save()
+        self.sale = Sale.objects.create(employee=self.employee, total=Decimal('5000000'))
+        self.employee.recalculate_commissions()
+        self.commission = Commission.objects.get(sale=self.sale)
+        self.payment = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('500000'),
+            period_month=self.sale.created_at.month, period_year=self.sale.created_at.year)
+
+    def paid(self):
+        self.commission.refresh_from_db()
+        return self.commission.paid_amount
+
+    def deletions(self, token):
+        return {(r['label'], r['sync_id']) for r in self.pull(token).json()['changes']
+                if r['is_deleted']}
+
+    def test_deleted_on_server_reaches_manager_laptops(self):
+        self.payment.delete()
+        self.assertEqual(self.paid(), Decimal('0'))
+        self.assertIn(('panel.CommissionPayment', str(self.payment.sync_id)),
+                      self.deletions('tok-mgr'))
+
+    def test_manager_payment_deleted_on_server_reaches_manager_laptops(self):
+        boss = Manager.objects.create(name='Boss')
+        payment = ManagerCommissionPayment.objects.create(manager=boss, amount=Decimal('10'))
+        payment.delete()
+        self.assertIn(('panel.ManagerCommissionPayment', str(payment.sync_id)),
+                      self.deletions('tok-mgr'))
+
+    @override_settings(SYNC_ROLE='manager')
+    def test_deleted_on_laptop_is_queued_with_released_commission(self):
+        SyncOutbox.objects.all().delete()
+        self.payment.delete()
+        queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
+        self.assertIn(('panel.CommissionPayment', str(self.payment.sync_id), True), queued)
+        self.assertIn(('panel.Commission', str(self.commission.sync_id), False), queued)
+        self.assertFalse(SyncTombstone.objects.exists())  # a laptop pushes it instead
+
+    def test_pushed_deletion_is_not_taken_back_twice(self):
+        # Two payments on the commission: 300000 and 200000.
+        CommissionPayment.objects.filter(pk=self.payment.pk).update(
+            amount=Decimal('300000'), allocations={str(self.sale.sync_id): '300000.00'})
+        Commission.objects.filter(pk=self.commission.pk).update(paid_amount=Decimal('300000'))
+        other = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('200000'),
+            period_month=self.sale.created_at.month, period_year=self.sale.created_at.year)
+        self.assertEqual(self.paid(), Decimal('500000'))
+        # The manager laptop deleted the first one: it already took the 300000
+        # back out of the commission and pushes the result with the deletion.
+        resp = self.push('tok-mgr', [
+            row('panel.Commission', self.commission.sync_id,
+                employee=str(self.employee.sync_id), sale=str(self.sale.sync_id),
+                amount='500000', paid_amount='200000'),
+            row('panel.CommissionPayment', self.payment.sync_id, deleted=True),
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(list(CommissionPayment.objects.all()), [other])
+        self.assertEqual(self.paid(), Decimal('200000'))
+        self.assertTrue(SyncTombstone.objects.filter(sync_id=self.payment.sync_id).exists())
+
+    def test_pulled_edit_does_not_redistribute(self):
+        # A laptop applies another node's edit; that node's commission rows
+        # carry the new split, so applying the payment row must not pay again.
+        fields = serialize_instance(self.payment)['fields']
+        fields['amount'] = '300000'
+        apply_batch([row('panel.CommissionPayment', self.payment.sync_id, **fields)],
+                    is_pull=True, node_name='mgr-1')
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.amount, Decimal('300000'))
+        self.assertEqual(self.paid(), Decimal('500000'))
+
+    def test_split_survives_the_round_trip(self):
+        data = serialize_instance(self.payment)
+        self.assertEqual(data['fields']['allocations'], {str(self.sale.sync_id): '500000.00'})
+        CommissionPayment.objects.filter(pk=self.payment.pk).update(allocations={})
+        apply_batch([data], is_pull=True, node_name='mgr-1')
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.allocations, {str(self.sale.sync_id): '500000.00'})

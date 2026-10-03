@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from decimal import Decimal
 from django.db.models.signals import post_save, post_delete
@@ -587,38 +587,112 @@ class CommissionPayment(SyncModel):
     period_year = models.PositiveSmallIntegerField(null=True, blank=True)
     # Optionally, link to commissions paid in this payment (for audit)
     commissions = models.ManyToManyField(Commission, blank=True, related_name='payments')
+    # How much of the payment went to each commission, keyed by that
+    # commission's sale sync_id: the same on every node, unlike the
+    # commission's own, which sync may replace. It is what lets a payment be
+    # edited or deleted exactly. Empty for one recorded before splits were
+    # kept (see _release).
+    allocations = models.JSONField(default=dict, blank=True)
 
     def save(self, *args, **kwargs):
-        # During sync apply, persist only. Re-running FIFO distribution would
+        # During sync apply, persist only. Re-running the distribution would
         # double-pay commissions; the Commission rows are synced separately.
         from sync.tracking import sync_apply_active
         if sync_apply_active():
             return super().save(*args, **kwargs)
-        super().save(*args, **kwargs)
-        # Distribute payment to unpaid commissions (FIFO), the payment's own
-        # period first: paying a month's commission must clear that month, not
-        # an older one. Anything left over goes to the oldest others.
-        commissions = list(Commission.objects.filter(employee=self.employee).order_by('created_at'))
+        with transaction.atomic():
+            previous = None
+            if not self._state.adding:
+                previous = CommissionPayment.objects.filter(pk=self.pk).first()
+            # A new payment is distributed; an edited one again only when what
+            # it pays changed (editing just the note leaves its split alone).
+            redistribute = previous is None or (
+                (previous.employee_id, previous.amount, previous.period_month, previous.period_year)
+                != (self.employee_id, Decimal(str(self.amount)), self.period_month, self.period_year))
+            paid = None
+            if redistribute:
+                if previous is not None:
+                    previous._release()
+                paid = self._allocate()
+                if kwargs.get('update_fields') is not None:
+                    kwargs['update_fields'] = {*kwargs['update_fields'], 'allocations', 'sync_updated_at'}
+            super().save(*args, **kwargs)
+            if paid is not None:
+                self.commissions.set(paid)
+
+    def delete(self, *args, **kwargs):
+        # Mirror save(): during sync apply just remove the row; the Commission
+        # rows it paid arrive through sync already released.
+        from sync.tracking import record_server_deletion, sync_apply_active
+        if sync_apply_active():
+            return super().delete(*args, **kwargs)
+        with transaction.atomic():
+            stored = CommissionPayment.objects.filter(pk=self.pk).first()
+            if stored is not None:
+                stored._release()
+            result = super().delete(*args, **kwargs)
+            record_server_deletion(self)
+        return result
+
+    def _allocate(self):
+        """Pay ``amount`` into the employee's unpaid commissions, oldest first
+        but the payment's own period before any other: paying a month's
+        commission must clear that month, not an older one. Records the split
+        in ``allocations`` and returns the commissions paid."""
+        commissions = list(Commission.objects.filter(employee_id=self.employee_id)
+                           .select_related('sale').order_by('created_at', 'pk'))
         if self.period_month and self.period_year:
             in_period = set(Commission.objects.filter(
-                employee=self.employee, sale__created_at__year=self.period_year,
+                employee_id=self.employee_id, sale__created_at__year=self.period_year,
                 sale__created_at__month=self.period_month,
             ).values_list('pk', flat=True))
             commissions.sort(key=lambda c: c.pk not in in_period)  # stable
-        remaining = float(self.amount)
+        remaining = Decimal(str(self.amount))
+        allocations, paid = {}, []
         for commission in commissions:
-            unpaid = float(commission.unpaid_amount)
-            if unpaid <= 0:
+            if remaining <= 0:
+                break
+            pay = min(commission.unpaid_amount, remaining)
+            if pay <= 0:
                 continue
-            pay = min(unpaid, remaining)
-            commission.paid_amount = float(commission.paid_amount) + pay
+            commission.paid_amount += pay
             # sync_updated_at too, or a payment made on the server never
             # reaches the laptops (they pull rows by that timestamp).
             commission.save(update_fields=['paid_amount', 'sync_updated_at'])
-            self.commissions.add(commission)
+            allocations[str(commission.sale.sync_id)] = str(_cents(pay))
+            paid.append(commission)
             remaining -= pay
+        self.allocations = allocations
+        return paid
+
+    def _release(self):
+        """Take this payment back out of the commissions it paid."""
+        def take_back(commission, amount):
+            amount = min(amount, commission.paid_amount)
+            if amount > 0:
+                commission.paid_amount -= amount
+                commission.save(update_fields=['paid_amount', 'sync_updated_at'])
+            return amount
+
+        if self.allocations:
+            commissions = {str(c.sale.sync_id): c for c in Commission.objects.filter(
+                employee_id=self.employee_id, sale__sync_id__in=list(self.allocations),
+            ).select_related('sale')}
+            for sale_sync_id, amount in self.allocations.items():
+                commission = commissions.get(sale_sync_id)
+                if commission is not None:  # else its sale is gone, and it with it
+                    take_back(commission, Decimal(amount))
+            return
+        # Recorded before splits were kept: take it back from the commissions
+        # it is linked to, newest first, then from the newest others.
+        linked = list(self.commissions.order_by('-created_at', '-pk'))
+        others = (Commission.objects.filter(employee_id=self.employee_id)
+                  .exclude(pk__in=[c.pk for c in linked]).order_by('-created_at', '-pk'))
+        remaining = Decimal(str(self.amount))
+        for commission in [*linked, *others]:
             if remaining <= 0:
                 break
+            remaining -= take_back(commission, remaining)
 
     def __str__(self):
         return f"Commission Payment {self.amount} to {self.employee.name} at {self.paid_at}"
@@ -654,6 +728,12 @@ class ManagerCommissionPayment(SyncModel):
     # The commission period (month/year) this payment is recorded against.
     period_month = models.PositiveSmallIntegerField(null=True, blank=True)
     period_year = models.PositiveSmallIntegerField(null=True, blank=True)
+
+    def delete(self, *args, **kwargs):
+        from sync.tracking import record_server_deletion
+        result = super().delete(*args, **kwargs)
+        record_server_deletion(self)
+        return result
 
     def __str__(self):
         return f"Commission Payment {self.amount} to Manager {self.manager.name} at {self.paid_at}"
