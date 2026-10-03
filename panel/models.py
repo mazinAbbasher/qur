@@ -595,8 +595,16 @@ class CommissionPayment(SyncModel):
         if sync_apply_active():
             return super().save(*args, **kwargs)
         super().save(*args, **kwargs)
-        # Distribute payment to unpaid commissions (FIFO)
-        commissions = Commission.objects.filter(employee=self.employee).order_by('created_at')
+        # Distribute payment to unpaid commissions (FIFO), the payment's own
+        # period first: paying a month's commission must clear that month, not
+        # an older one. Anything left over goes to the oldest others.
+        commissions = list(Commission.objects.filter(employee=self.employee).order_by('created_at'))
+        if self.period_month and self.period_year:
+            in_period = set(Commission.objects.filter(
+                employee=self.employee, sale__created_at__year=self.period_year,
+                sale__created_at__month=self.period_month,
+            ).values_list('pk', flat=True))
+            commissions.sort(key=lambda c: c.pk not in in_period)  # stable
         remaining = float(self.amount)
         for commission in commissions:
             unpaid = float(commission.unpaid_amount)
@@ -604,7 +612,9 @@ class CommissionPayment(SyncModel):
                 continue
             pay = min(unpaid, remaining)
             commission.paid_amount = float(commission.paid_amount) + pay
-            commission.save(update_fields=['paid_amount'])
+            # sync_updated_at too, or a payment made on the server never
+            # reaches the laptops (they pull rows by that timestamp).
+            commission.save(update_fields=['paid_amount', 'sync_updated_at'])
             self.commissions.add(commission)
             remaining -= pay
             if remaining <= 0:

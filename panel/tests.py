@@ -19,10 +19,11 @@ from django.urls import reverse
 
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
-    Commission, Employee, Inventory, Invoice, InvoicePayment, Product,
+    Commission, CommissionPayment, Employee, Inventory, Invoice, InvoicePayment, Product,
     ReturnedProduct, Sale, SaleItem, Shipment,
 )
 from sync.models import SyncOutbox
+from sync.tracking import apply_guard
 from panel.permissions import MANAGER_GROUP, SALESPERSON_GROUP
 
 
@@ -712,6 +713,15 @@ class CommissionTests(SaleFormTestMixin, TestCase):
         self.assertFalse(Commission.objects.exists())
 
 
+def _run_migration(name, function):
+    """Call a data migration's function with the models as of that migration,
+    as ``migrate`` does (no custom save() methods or signals)."""
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+    apps = MigrationExecutor(connection).loader.project_state(('panel', name)).apps
+    getattr(import_module(f'panel.migrations.{name}'), function)(apps, None)
+
+
 @override_settings(SYNC_ROLE='server')
 class BackfillCommissionsMigrationTests(TestCase):
     def setUp(self):
@@ -720,14 +730,10 @@ class BackfillCommissionsMigrationTests(TestCase):
         Employee.objects.filter(pk=self.employee.pk).update(commission_percentage=Decimal('10'))
 
     def _backfill(self):
-        from django.apps import apps
-        module = import_module('panel.migrations.0010_backfill_commissions')
-        module.backfill_commissions(apps, None)
+        _run_migration('0010_backfill_commissions', 'backfill_commissions')
 
     def _shrink_reassigned(self):
-        from django.apps import apps
-        module = import_module('panel.migrations.0011_reassigned_sale_commissions')
-        module.shrink_reassigned_commissions(apps, None)
+        _run_migration('0011_reassigned_sale_commissions', 'shrink_reassigned_commissions')
 
     def _sale(self, total, when=None):
         return Sale.objects.create(employee=self.employee, total=Decimal(total),
@@ -778,3 +784,112 @@ class BackfillCommissionsMigrationTests(TestCase):
         self._sale('1000')
         self._backfill()
         self.assertFalse(Commission.objects.exists())
+
+
+def _local(y, m, d):
+    return datetime(y, m, d, 12, tzinfo=dt_timezone.utc)
+
+
+@override_settings(SYNC_ROLE='server')
+class CommissionPaymentTests(TestCase):
+    """A payment recorded for a month clears that month's commission, even when
+    older months still have unpaid commissions."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.manager = User.objects.create_user('boss', password='pw12345!x')
+        self.manager.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.client.force_login(self.manager)
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.june = Sale.objects.create(employee=self.employee, total=Decimal('3000000'),
+                                        created_at=_local(2026, 6, 10))
+        self.september = Sale.objects.create(employee=self.employee, total=Decimal('5000000'),
+                                             created_at=_local(2026, 9, 10))
+        self.employee.recalculate_commissions()
+
+    def unpaid(self, month):
+        return self.employee.get_unpaid_commission(month=month, year=2026)
+
+    def pay(self, amount, month):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal('1e9')):
+            return self.client.post(reverse('panel:commission_pay', args=[self.employee.pk]), {
+                'amount': amount, 'period_month': month, 'period_year': 2026})
+
+    def test_payment_clears_its_own_month(self):
+        self.pay('500000', 9)
+        self.assertEqual(self.unpaid(9), Decimal('0'))
+        self.assertEqual(self.unpaid(6), Decimal('300000'))
+        payment = CommissionPayment.objects.get()
+        self.assertEqual(list(payment.commissions.all()),
+                         [Commission.objects.get(sale=self.september)])
+
+    def test_payment_over_the_months_unpaid_refused(self):
+        self.pay('600000', 9)  # within the 800000 owed overall, but not September's
+        self.assertFalse(CommissionPayment.objects.exists())
+        self.assertEqual(self.unpaid(9), Decimal('500000'))
+
+    def test_leftover_goes_to_oldest_other_month(self):
+        CommissionPayment.objects.create(employee=self.employee, amount=Decimal('600000'),
+                                         period_month=9, period_year=2026)
+        self.assertEqual(self.unpaid(9), Decimal('0'))
+        self.assertEqual(self.unpaid(6), Decimal('200000'))
+
+    def test_paid_commission_is_pulled_by_laptops(self):
+        commission = Commission.objects.get(sale=self.september)
+        before = commission.sync_updated_at
+        self.pay('500000', 9)
+        commission.refresh_from_db()
+        self.assertGreater(commission.sync_updated_at, before)
+
+
+@override_settings(SYNC_ROLE='server')
+class ReallocatePaymentsMigrationTests(TestCase):
+    def setUp(self):
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.commissions = {}
+        for month, total in ((5, '1000000'), (6, '3000000'), (9, '5000000')):
+            sale = Sale.objects.create(employee=self.employee, total=Decimal(total),
+                                       created_at=_local(2026, month, 10))
+            self.commissions[month] = Commission.objects.create(
+                employee=self.employee, sale=sale, amount=Decimal(total) / 10,
+                created_at=sale.created_at)
+
+    def _record(self, amount, paid, period=None):
+        """A payment as the old FIFO code left it: ``paid`` maps month -> amount."""
+        with apply_guard():  # skip save()'s distribution
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal(amount),
+                period_month=period, period_year=2026 if period else None)
+        for month, value in paid.items():
+            c = self.commissions[month]
+            c.paid_amount += Decimal(value)
+            c.save()
+            payment.commissions.add(c)
+        return payment
+
+    def _run(self):
+        _run_migration('0012_reallocate_commission_payments', 'reallocate')
+
+    def paid(self, month):
+        self.commissions[month].refresh_from_db()
+        return self.commissions[month].paid_amount
+
+    def test_period_payment_moves_to_its_month(self):
+        # FIFO put September's 500000 on May and June first, Sept got the rest.
+        payment = self._record('500000', {5: '100000', 6: '300000', 9: '100000'}, period=9)
+        self._run()
+        self.assertEqual((self.paid(5), self.paid(6), self.paid(9)),
+                         (Decimal('0'), Decimal('0'), Decimal('500000')))
+        self.assertEqual(list(payment.commissions.all()), [self.commissions[9]])
+
+    def test_payment_without_period_keeps_its_commissions(self):
+        # Paid June before May's commission existed (it was filled in later).
+        self._record('300000', {6: '300000'})
+        self._run()
+        self.assertEqual((self.paid(5), self.paid(6)), (Decimal('0'), Decimal('300000')))
+
+    def test_inconsistent_employee_left_alone(self):
+        self._record('500000', {5: '100000', 6: '300000', 9: '100000'}, period=9)
+        Commission.objects.filter(pk=self.commissions[5].pk).update(paid_amount=Decimal('150000'))
+        self._run()
+        self.assertEqual((self.paid(5), self.paid(9)), (Decimal('150000'), Decimal('100000')))

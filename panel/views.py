@@ -2444,7 +2444,8 @@ def commission_pay(request, employee_id):
     except Exception:
         messages.error(request, "المبلغ غير صالح.")
         return redirect(redirect_url)
-    unpaid = employee.get_unpaid_commission()
+    # The payment clears this period's commissions, so it can't exceed them.
+    unpaid = employee.get_unpaid_commission(month=period_month, year=period_year)
     if amount <= 0 or amount > unpaid:
         messages.error(request, "المبلغ يجب أن يكون أكبر من صفر وأقل أو يساوي العمولة غير المدفوعة.")
         return redirect(redirect_url)
