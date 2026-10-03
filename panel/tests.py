@@ -5,7 +5,8 @@ These use an isolated test database; the real db.sqlite3 is never touched.
 """
 
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone as dt_timezone
+from importlib import import_module
 from decimal import Decimal
 from unittest import mock
 
@@ -18,8 +19,8 @@ from django.urls import reverse
 
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
-    Inventory, Invoice, InvoicePayment, Product, ReturnedProduct, Sale,
-    SaleItem, Shipment,
+    Commission, Employee, Inventory, Invoice, InvoicePayment, Product,
+    ReturnedProduct, Sale, SaleItem, Shipment,
 )
 from sync.models import SyncOutbox
 from panel.permissions import MANAGER_GROUP, SALESPERSON_GROUP
@@ -605,3 +606,113 @@ class SaleEditPriceTests(SaleFormTestMixin, TestCase):
         self._set_price(self.inv_a, sdg='3000')
         html = self.client.get(reverse('panel:sale_edit', args=[sale.pk])).content.decode()
         self.assertRegex(html, r'name="items-0-price" value="2000\.00"')
+
+
+@override_settings(SYNC_ROLE='server')
+class CommissionTests(SaleFormTestMixin, TestCase):
+    """Every sale with an employee carries its commission, so the employee pages
+    show it; it follows the sale's total and the employee's percentage."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+
+    def _sell(self, qty, employee=None):
+        data = self._data([self._row(self.inv_a, qty)])
+        data['employee'] = (employee or self.employee).pk
+        self.client.post(reverse('panel:sale_create'), data)
+        return Sale.objects.latest('pk')
+
+    def _amount(self, sale, employee=None):
+        return Commission.objects.get(employee=employee or self.employee, sale=sale).amount
+
+    def test_sale_gets_commission(self):
+        sale = self._sell(3)  # 3 x 2000
+        self.assertEqual(self._amount(sale), Decimal('600'))
+
+    def test_sale_at_zero_percent_still_gets_one(self):
+        unpaid = Employee.objects.create(name='New rep')
+        sale = self._sell(3, employee=unpaid)
+        self.assertEqual(self._amount(sale, unpaid), Decimal('0'))
+
+    def test_return_and_its_removal_follow_the_total(self):
+        sale = self._sell(3)
+        returned = ReturnedProduct.objects.create(
+            sale=sale, sale_item=sale.items.get(), quantity=1)
+        self.assertEqual(self._amount(sale), Decimal('400'))
+        returned.delete()
+        self.assertEqual(self._amount(sale), Decimal('600'))
+
+    def test_setting_percentage_fills_in_missing_commissions(self):
+        # A sale saved without a commission (e.g. one synced up from a
+        # salesperson laptop before the server created them).
+        sale = Sale.objects.create(employee=self.employee, total=Decimal('5000000'))
+        self.assertFalse(Commission.objects.exists())
+        self.employee.commission_percentage = Decimal('12')
+        self.employee.save()
+        commission = Commission.objects.get(employee=self.employee, sale=sale)
+        self.assertEqual(commission.amount, Decimal('600000'))
+        self.assertEqual(commission.created_at, sale.created_at)
+        self.assertEqual(self.employee.get_monthly_commission(
+            sale.created_at.month, sale.created_at.year), Decimal('600000'))
+
+    def test_zero_commission_follows_new_percentage(self):
+        zero = Employee.objects.create(name='New rep')
+        sale = self._sell(3, employee=zero)
+        zero.commission_percentage = Decimal('5')
+        zero.save()
+        self.assertEqual(self._amount(sale, zero), Decimal('300'))
+
+    @override_settings(SYNC_ROLE='salesperson')
+    def test_salesperson_laptop_leaves_commissions_to_server(self):
+        sale = Sale.objects.create(employee=self.employee, total=Decimal('1000'))
+        sale.calculate_total()
+        self.employee.save()
+        self.assertFalse(Commission.objects.exists())
+
+
+@override_settings(SYNC_ROLE='server')
+class BackfillCommissionsMigrationTests(TestCase):
+    def setUp(self):
+        self.employee = Employee.objects.create(name='Rep')
+        # Raise the percentage without the signal, as an old install would hold it.
+        Employee.objects.filter(pk=self.employee.pk).update(commission_percentage=Decimal('10'))
+
+    def _backfill(self):
+        from django.apps import apps
+        module = import_module('panel.migrations.0010_backfill_commissions')
+        module.backfill_commissions(apps, None)
+
+    def _sale(self, total, when=None):
+        return Sale.objects.create(employee=self.employee, total=Decimal(total),
+                                   created_at=when or datetime(2026, 5, 3, tzinfo=dt_timezone.utc))
+
+    def test_missing_commission_created_in_the_sale_month(self):
+        sale = self._sale('5000000')
+        self._backfill()
+        commission = Commission.objects.get(sale=sale)
+        self.assertEqual(commission.amount, Decimal('500000'))
+        self.assertEqual(commission.created_at, sale.created_at)
+        self.assertEqual(self.employee.get_monthly_commission(5, 2026), Decimal('500000'))
+        self.assertEqual(self.employee.get_unpaid_commission(5, 2026), Decimal('500000'))
+
+    def test_unpaid_commission_recomputed_paid_one_kept(self):
+        stale = self._sale('1000')
+        Commission.objects.create(employee=self.employee, sale=stale, amount=Decimal('0'))
+        paid = self._sale('1000')
+        Commission.objects.create(employee=self.employee, sale=paid,
+                                  amount=Decimal('50'), paid_amount=Decimal('20'))
+        self._backfill()
+        self.assertEqual(Commission.objects.get(sale=stale).amount, Decimal('100'))
+        self.assertEqual(Commission.objects.get(sale=paid).amount, Decimal('50'))
+
+    def test_sale_without_employee_skipped(self):
+        Sale.objects.create(total=Decimal('1000'))
+        self._backfill()
+        self.assertFalse(Commission.objects.exists())
+
+    @override_settings(SYNC_ROLE='salesperson')
+    def test_salesperson_laptop_skipped(self):
+        self._sale('1000')
+        self._backfill()
+        self.assertFalse(Commission.objects.exists())

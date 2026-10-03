@@ -834,3 +834,68 @@ class ClientPullPolicyTests(SyncSetup):
         state = SyncState.get()
         self.assertEqual(state.pull_policy, '')
         self.assertIsNone(state.last_pull_cursor)
+
+
+class PushedCommissionTests(SyncSetup):
+    """The server gives pushed sales their commissions. A salesperson laptop
+    holds no commission percentages, so its sales arrive without one."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.save()
+
+    def _push_sale(self, sale_uid, total, token='tok-sales'):
+        return self.push(token, [
+            row('panel.Sale', sale_uid, employee=str(self.employee.sync_id),
+                created_at='2026-09-01T10:00:00+00:00', total=total),
+        ])
+
+    def _commission(self, sale_uid):
+        return Commission.objects.get(employee=self.employee, sale__sync_id=sale_uid)
+
+    def test_salesperson_sale_gets_commission(self):
+        sale_uid = uuid.uuid4()
+        self.assertEqual(self._push_sale(sale_uid, '5000000').status_code, 200)
+        commission = self._commission(sale_uid)
+        self.assertEqual(commission.amount, Decimal('500000'))
+        self.assertEqual(commission.created_at, parse_datetime('2026-09-01T10:00:00+00:00'))
+        # It reaches the manager laptops; salespeople still never see commissions.
+        def labels(token):
+            return {r['label'] for r in self.pull(token).json()['changes']}
+        self.assertIn('panel.Commission', labels('tok-mgr'))
+        self.assertNotIn('panel.Commission', labels('tok-sales'))
+
+    def test_pushed_total_change_updates_commission(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        self._push_sale(sale_uid, '800')  # e.g. a return recorded on the laptop
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('80'))
+
+    def test_pushed_percentage_reaches_sales_the_laptop_had_not_seen(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        self.push('tok-mgr', [row('panel.Employee', self.employee.sync_id,
+                                  commission_percentage='20')])
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('200'))
+
+    def test_partly_paid_commission_not_rerated_twice(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        commission = self._commission(sale_uid)
+        commission.paid_amount = Decimal('50')
+        commission.save()
+        # The manager laptop re-rated the unpaid 50 from 10% to 20% (-> 150)
+        # and pushes the result with the percentage change.
+        self.push('tok-mgr', [
+            row('panel.Employee', self.employee.sync_id, commission_percentage='20'),
+            row('panel.Commission', commission.sync_id,
+                employee=str(self.employee.sync_id), sale=str(sale_uid),
+                amount='150', paid_amount='50'),
+        ])
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('150'))
+
+    def test_pull_leaves_commissions_to_the_server(self):
+        apply_batch([row('panel.Sale', uuid.uuid4(), employee=str(self.employee.sync_id),
+                         total='1000')], is_pull=True, node_name='mgr-1')
+        self.assertFalse(Commission.objects.exists())

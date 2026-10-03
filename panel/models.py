@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from django.utils import timezone
 from decimal import Decimal
@@ -71,6 +72,38 @@ class Employee(SyncModel):
             sales = sales.filter(created_at__year=year, created_at__month=month)
         commissions = Commission.objects.filter(employee=self, sale__in=sales)
         return sum([c.unpaid_amount for c in commissions])
+
+    def recalculate_commissions(self, rerate_partly_paid=True):
+        """Bring this employee's commissions in line with their current percentage.
+
+        A sale without a commission gets one (e.g. one made while the percentage
+        was 0). An unpaid commission is recomputed in full; a partly paid one
+        keeps its paid part and re-rates only the rest, unless
+        ``rerate_partly_paid`` is False; a fully paid one is left alone.
+        """
+        if not computes_commissions():
+            return
+        commissions = {c.sale_id: c for c in Commission.objects.filter(employee=self)}
+        for sale in Sale.objects.filter(employee=self):
+            amount = commission_for(sale.total, self.commission_percentage)
+            commission = commissions.get(sale.pk)
+            if commission is None:
+                Commission.objects.create(employee=self, sale=sale, amount=amount,
+                                          created_at=sale.created_at)
+                continue
+            paid = float(commission.paid_amount)
+            if paid == 0:
+                pass  # recomputed in full: ``amount`` above
+            elif rerate_partly_paid and paid < commission.amount:
+                old_percentage = float(commission.amount) / float(sale.total or 0) * 100 if sale.total else 0
+                exchange = float(self.commission_percentage) / old_percentage if old_percentage else 0
+                # apply new percentage to just the remaining unpaid amount
+                amount = _cents(paid + float(commission.unpaid_amount) * exchange)
+            else:
+                continue
+            if commission.amount != amount:
+                commission.amount = amount
+                commission.save()
 
     def delete(self, *args, **kwargs):
         # Commission has on_delete=CASCADE, so the database removes them together
@@ -284,6 +317,9 @@ class Sale(SyncModel):
         returned_total = sum(r.value for r in self.returned_products.all())
         self.total = total - returned_total
         self.save()
+        # The commission is a share of the total, so it follows every change
+        # (creating, editing, and adding or removing a return).
+        update_sale_commission(self)
         return self.total
 
     def __str__(self):
@@ -497,6 +533,39 @@ class Commission(SyncModel):
     def __str__(self):
         return f"Commission for {self.employee.name} on Sale #{self.sale.pk}"
 
+CENT = Decimal('0.01')
+
+def _cents(value):
+    return Decimal(str(value or 0)).quantize(CENT)
+
+def commission_for(total, percentage):
+    """``percentage`` % of ``total``, rounded like ``Commission.amount``."""
+    return _cents(Decimal(str(total or 0)) * Decimal(str(percentage or 0)) / 100)
+
+def computes_commissions():
+    """A salesperson laptop never holds commission percentages (they're
+    stripped when syncing), so it leaves commissions to the server."""
+    return getattr(settings, 'SYNC_ROLE', 'standalone') != 'salesperson'
+
+def update_sale_commission(sale):
+    """Create or recompute ``sale``'s commission at its employee's current percentage.
+
+    Runs whenever a sale's total is calculated and, on the server, for every
+    sale pushed up from a laptop (see sync.engine) — a salesperson's sales
+    arrive without one.
+    """
+    if not sale.employee_id or not computes_commissions():
+        return
+    employee = sale.employee
+    amount = commission_for(sale.total, employee.commission_percentage)
+    commission = Commission.objects.filter(employee=employee, sale=sale).first()
+    if commission is None:
+        Commission.objects.create(employee=employee, sale=sale, amount=amount,
+                                  created_at=sale.created_at)
+    elif commission.amount != amount:
+        commission.amount = amount
+        commission.save()
+
 class CommissionPayment(SyncModel):
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='commission_payments')
     amount = models.DecimalField(max_digits=12, decimal_places=2)
@@ -542,28 +611,12 @@ def update_employee_commissions(sender, instance, **kwargs):
     Paid portions remain unchanged and are not recalculated.
     """
     # Applying a synced Employee row must not recompute commissions locally —
-    # Commission rows arrive through sync with their authoritative amounts.
+    # Commission rows arrive through sync with their authoritative amounts
+    # (the server catches up after a push, see sync.engine).
     from sync.tracking import sync_apply_active
     if sync_apply_active():
         return
-    from .models import Sale, Commission
-    sales = Sale.objects.filter(employee=instance)
-    for sale in sales:
-        for commission_obj in Commission.objects.filter(employee=instance, sale=sale):
-            paid = float(commission_obj.paid_amount)
-            # Only update unpaid commissions
-            if paid < commission_obj.amount:
-                if paid == 0:
-                    new_total = float(sale.total or 0) * float(instance.commission_percentage or 0) / 100
-                    commission_obj.amount = new_total
-                    commission_obj.save(update_fields=['amount'])
-                else:
-                    old_percentage = float(commission_obj.amount) / float(sale.total or 0) * 100 if sale.total else 0
-                    new_percentage = float(instance.commission_percentage)
-                    exchange = new_percentage / old_percentage if old_percentage else 0
-                    # apply new percentage to just the remaining unpaid amount
-                    commission_obj.amount = paid + (float(commission_obj.unpaid_amount) * float(exchange))
-                    commission_obj.save()
+    instance.recalculate_commissions()
 
 class Manager(SyncModel):
     name = models.CharField(max_length=100, blank = False, null = False)

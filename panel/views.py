@@ -870,17 +870,7 @@ def sale_create(request):
                     sale.total = total
                     sale.save()
                     formset.save_m2m()
-                    sale.calculate_total()
-                    # --- Commission creation ---
-                    employee = sale.employee
-                    if employee and getattr(employee, 'commission_percentage', 0):
-                        commission_percentage = float(employee.commission_percentage)
-                        commission_amount = float(sale.total or 0) * (commission_percentage / 100)
-                        Commission.objects.update_or_create(
-                            employee=employee, sale=sale,
-                            defaults={'amount': commission_amount}
-                        )
-                    # --- End commission creation ---
+                    sale.calculate_total()  # also creates the commission
                     invoice = Invoice.objects.create(
                         sale=sale,
                         created_at=timezone.now(),
@@ -1110,20 +1100,11 @@ def sale_edit(request, pk):
                     saved_sale.total = total
                     saved_sale.save()
                     formset.save_m2m()
-                    saved_sale.calculate_total()
+                    saved_sale.calculate_total()  # also recomputes the commission
                     total = saved_sale.total
 
                     if invoice and invoice.paid_amount > total and total > 0:
                         raise ValueError("لا يمكن تقليل الإجمالي ليكون أقل من المبلغ المدفوع مسبقاً.")
-
-                    employee = saved_sale.employee
-                    if employee and getattr(employee, 'commission_percentage', 0):
-                        commission_percentage = float(employee.commission_percentage)
-                        commission_amount = float(total or 0) * (commission_percentage / 100)
-                        Commission.objects.update_or_create(
-                            employee=employee, sale=saved_sale,
-                            defaults={'amount': commission_amount}
-                        )
 
                     if invoice:
                         invoice.total = total
@@ -1169,16 +1150,7 @@ def sale_return_product(request, pk):
     if form.is_valid():
         returned = form.save(commit=False)
         returned.sale = sale
-        returned.save()
-        # update the commsison for the employee if exists
-        employee = sale.employee
-        if employee and getattr(employee, 'commission_percentage', 0):
-            commission_percentage = float(employee.commission_percentage)
-            commission_amount = float(sale.total or 0) * (commission_percentage / 100)
-            Commission.objects.update_or_create(
-                employee=employee, sale=sale,
-                defaults={'amount': commission_amount}
-            )
+        returned.save()  # recalculates the sale total and its commission
         messages.success(request, f"تم تسجيل إرجاع {returned.quantity} وحدة من {returned.sale_item.inventory.product.name}.")
     else:
         for error in form.errors.values():

@@ -400,6 +400,21 @@ def _recompute_inventory(inv, node_name):
     return False
 
 
+def _update_commissions(sale_pks, employee_pks):
+    """Server side, after applying a push: give every pushed sale its commission
+    (a salesperson laptop holds no commission percentages, so its sales arrive
+    without one) and apply a pushed percentage change to the sales the pushing
+    laptop hadn't pulled yet."""
+    from panel.models import Employee, Sale, update_sale_commission
+
+    for sale in Sale.objects.filter(pk__in=sale_pks).select_related('employee'):
+        update_sale_commission(sale)
+    # Partly paid commissions were already re-rated by the laptop that changed
+    # the percentage (and pushed in this batch); re-rating here would do it twice.
+    for employee in Employee.objects.filter(pk__in=employee_pks):
+        employee.recalculate_commissions(rerate_partly_paid=False)
+
+
 @transaction.atomic
 def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
     """Apply serialized ``rows`` and return a stats dict.
@@ -415,6 +430,8 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
         by_label[r['label']].append(r)
 
     touched_inventory_pks = set()
+    pushed_sale_pks = set()
+    pushed_employee_pks = set()
 
     def _note_inventory(label, obj):
         if obj is None:
@@ -427,6 +444,11 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
             touched_inventory_pks.add(obj.sale_item.inventory_id)
 
     def _handle(label, status, result):
+        if status == 'applied' and not is_pull:
+            if label == 'panel.Sale':
+                pushed_sale_pks.add(result.pk)
+            elif label == 'panel.Employee':
+                pushed_employee_pks.add(result.pk)
         if not authoritative_inventory:
             return
         if status == 'applied':
@@ -461,6 +483,9 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
             else:
                 _handle(label, status, result)
         stats['deferred_min'] = deferred_min
+
+        if pushed_sale_pks or pushed_employee_pks:
+            _update_commissions(pushed_sale_pks, pushed_employee_pks)
 
         # Authoritative stock recompute (server side, after applying a push).
         # select_for_update serialises concurrent pushes touching the same batch
