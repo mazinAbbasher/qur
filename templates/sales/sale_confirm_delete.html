@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 {% block content %}
 <div class="container py-4">
   <div class="row justify-content-center">
@@ -31,7 +32,13 @@
             <i class="bi bi-info-circle-fill"></i> سيؤدي الحذف إلى:
             <ul class="mb-0 mt-2">
               <li>إرجاع جميع كميات المنتجات المباعة (الصافية بعد حساب المرتجعات) إلى المخزون.</li>
-              <li>حذف الفاتورة وأي مرتجعات أو عمولات مرتبطة لم يتم سدادها بعد.</li>
+              <li>حذف الفاتورة وأي مرتجعات أو عمولات مرتبطة بها.</li>
+              {% for employee, amount in owed_back %}
+              <li>عمولة هذه الفاتورة مدفوعة للمندوب {{ employee.name }} ({{ amount|floatformat:2|intcomma }}): سيُخصم المبلغ من عمولته غير المدفوعة، وإن لم يكن له ما يكفي تصبح سالبة (مبلغ مستحق عليه).</li>
+              {% endfor %}
+              {% for manager, amount in manager_commissions %}
+              <li>تنقص عمولة المدير {{ manager.name }} لشهر {{ sale.created_at|date:"Y-m" }} بمقدار {{ amount|floatformat:2|intcomma }}، وإن كانت مدفوعة يصبح المتبقي سالباً.</li>
+              {% endfor %}
             </ul>
           </div>
           <form method="post" class="d-flex justify-content-center gap-3 mt-4">

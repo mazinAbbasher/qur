@@ -996,3 +996,127 @@ class CommissionPaymentSyncTests(SyncSetup):
         apply_batch([data], is_pull=True, node_name='mgr-1')
         self.payment.refresh_from_db()
         self.assertEqual(self.payment.allocations, {str(self.sale.sync_id): '500000.00'})
+
+
+class SaleDeletionOwesBackSyncTests(SyncSetup):
+    """A sale deleted with its commission already paid leaves the employee
+    owing that back on the server too, however the deletion arrives, and never
+    twice."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.save()
+        self.sale = Sale.objects.create(employee=self.employee, total=Decimal('5000000'))
+        self.employee.recalculate_commissions()
+        self.commission = Commission.objects.get(sale=self.sale)
+        self.payment = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('500000'),
+            period_month=self.sale.created_at.month, period_year=self.sale.created_at.year)
+        self.key = str(self.sale.sync_id)
+
+    def owed_back(self):
+        self.payment.refresh_from_db()
+        return self.payment.owed_back
+
+    def laptop_payment_row(self):
+        """The payment as the laptop that deleted the sale pushes it."""
+        fields = serialize_instance(self.payment)['fields']
+        fields['cancelled'] = {self.key: '500000.00'}
+        return row('panel.CommissionPayment', self.payment.sync_id, **fields)
+
+    def test_salesperson_deletion_is_owed_back_here(self):
+        # A salesperson laptop holds no commissions: only the sale comes up.
+        cursor = self.pull('tok-mgr').json()['cursor']
+        resp = self.push('tok-sales', [row('panel.Sale', self.sale.sync_id, deleted=True)])
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertEqual(self.owed_back(), Decimal('500000'))
+        # The manager laptops get the payment along with the deletion.
+        pulled = [r['fields']['cancelled'] for r in self.pull('tok-mgr', cursor).json()['changes']
+                  if r['label'] == 'panel.CommissionPayment']
+        self.assertEqual(pulled, [{self.key: '500000.00'}])
+
+    def test_manager_laptop_deletion_is_not_owed_back_twice(self):
+        resp = self.push('tok-mgr', [
+            row('panel.Commission', self.commission.sync_id, deleted=True),
+            self.laptop_payment_row(),
+            row('panel.Sale', self.sale.sync_id, deleted=True),
+        ])
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertEqual(self.owed_back(), Decimal('500000'))
+
+    def test_commission_paid_here_since_the_laptop_pulled_is_owed_back(self):
+        # The laptop never saw this payment, so it pushes just the deletion.
+        self.push('tok-mgr', [
+            row('panel.Commission', self.commission.sync_id, deleted=True),
+            row('panel.Sale', self.sale.sync_id, deleted=True),
+        ])
+        self.assertEqual(self.owed_back(), Decimal('500000'))
+
+    def test_pulled_deletion_leaves_the_payment_to_the_server(self):
+        # Laptop side: the server sends its own updated payment.
+        apply_batch([row('panel.Sale', self.sale.sync_id, deleted=True)],
+                    is_pull=True, node_name='mgr-1')
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertEqual(self.owed_back(), Decimal('0'))
+
+    def test_pulled_deletion_with_the_payment_is_owed_back_once(self):
+        apply_batch([self.laptop_payment_row(),
+                     row('panel.Sale', self.sale.sync_id, deleted=True)],
+                    is_pull=True, node_name='mgr-1')
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertEqual(self.owed_back(), Decimal('500000'))
+
+
+class ReturnOwesBackSyncTests(SyncSetup):
+    """A return on a sale whose commission was paid charges the employee on the
+    server too, whichever laptop records it, and only once."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.save()
+        self.sale = Sale.objects.create(employee=self.employee, total=Decimal('5000000'))
+        self.employee.recalculate_commissions()
+        self.commission = Commission.objects.get(sale=self.sale)
+        self.payment = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('500000'),
+            period_month=self.sale.created_at.month, period_year=self.sale.created_at.year)
+        self.key = str(self.sale.sync_id)
+
+    def sale_row(self, total):
+        return row('panel.Sale', self.sale.sync_id, employee=str(self.employee.sync_id),
+                   total=total)
+
+    def state(self):
+        self.commission.refresh_from_db()
+        self.payment.refresh_from_db()
+        return self.commission.amount, self.commission.paid_amount, self.payment.owed_back
+
+    def test_salesperson_return_is_owed_back_here(self):
+        # A salesperson laptop holds no commissions: only the lower total comes up.
+        cursor = self.pull('tok-mgr').json()['cursor']
+        self.push('tok-sales', [self.sale_row('4000000')])
+        self.assertEqual(self.state(), (Decimal('400000'), Decimal('400000'), Decimal('100000')))
+        pulled = {r['label']: r['fields'] for r in self.pull('tok-mgr', cursor).json()['changes']}
+        self.assertEqual(pulled['panel.CommissionPayment']['cancelled'], {self.key: '100000.00'})
+        self.assertEqual(pulled['panel.Commission']['paid_amount'], '400000.00')
+
+    def test_salesperson_removing_the_return_undoes_it(self):
+        self.push('tok-sales', [self.sale_row('4000000')])
+        self.push('tok-sales', [self.sale_row('5000000')])
+        self.assertEqual(self.state(), (Decimal('500000'), Decimal('500000'), Decimal('0')))
+
+    def test_manager_laptop_return_is_not_owed_back_twice(self):
+        # The laptop settled it already and pushes the result with the sale.
+        fields = serialize_instance(self.payment)['fields']
+        fields['cancelled'] = {self.key: '100000.00'}
+        self.push('tok-mgr', [
+            row('panel.Commission', self.commission.sync_id, employee=str(self.employee.sync_id),
+                sale=self.key, amount='400000', paid_amount='400000'),
+            row('panel.CommissionPayment', self.payment.sync_id, **fields),
+            self.sale_row('4000000'),
+        ])
+        self.assertEqual(self.state(), (Decimal('400000'), Decimal('400000'), Decimal('100000')))

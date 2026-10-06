@@ -68,10 +68,18 @@ class Employee(SyncModel):
     def get_unpaid_commission(self, month=None, year=None):
         from .models import Commission, Sale
         sales = Sale.objects.filter(employee=self)
+        payments = self.commission_payments.all()
         if month and year:
             sales = sales.filter(created_at__year=year, created_at__month=month)
+            payments = payments.filter(
+                models.Q(period_month=month, period_year=year)
+                | models.Q(period_month__isnull=True, paid_at__year=year, paid_at__month=month))
         commissions = Commission.objects.filter(employee=self, sale__in=sales)
-        return sum([c.unpaid_amount for c in commissions])
+        # What a payment paid toward commissions since cancelled (a deleted
+        # sale, a return) is owed back, so it comes off what is unpaid, below
+        # zero when nothing is left to come off.
+        owed_back = sum(p.owed_back for p in payments)
+        return sum([c.unpaid_amount for c in commissions]) - owed_back
 
     def recalculate_commissions(self, rerate_partly_paid=True):
         """Bring this employee's commissions in line with their current percentage.
@@ -321,6 +329,18 @@ class Sale(SyncModel):
         # (creating, editing, and adding or removing a return).
         update_sale_commission(self)
         return self.total
+
+    def delete(self, *args, **kwargs):
+        # Its commissions go with it, but what they were paid stays paid out:
+        # the employee owes it back (see owe_back_commission). During sync
+        # apply the payments arrive already updated; the server does it itself
+        # for a deletion pushed to it (see sync.engine).
+        from sync.tracking import sync_apply_active
+        if sync_apply_active():
+            return super().delete(*args, **kwargs)
+        with transaction.atomic():
+            owe_back_sale_commissions(self)
+            return super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"Sale #{self.pk}"
@@ -572,6 +592,7 @@ def update_sale_commission(sale):
         Commission.objects.create(employee=employee, sale=sale, amount=amount,
                                   created_at=sale.created_at)
     elif commission.amount != amount:
+        _settle_paid_amount(commission, amount)
         commission.amount = amount
         commission.save()
 
@@ -593,6 +614,17 @@ class CommissionPayment(SyncModel):
     # edited or deleted exactly. Empty for one recorded before splits were
     # kept (see _release).
     allocations = models.JSONField(default=dict, blank=True)
+    # What of it paid commissions since cancelled, keyed the same way: all it
+    # paid toward one whose sale was deleted, or the part of one a return took
+    # below what it was paid. The employee keeps that money with no commission
+    # behind it, so it is owed back: it comes off the unpaid commission of the
+    # payment's period (see owe_back_commission).
+    cancelled = models.JSONField(default=dict, blank=True)
+
+    @property
+    def owed_back(self):
+        """What the employee owes back of this payment."""
+        return sum((Decimal(v) for v in self.cancelled.values()), Decimal('0'))
 
     def save(self, *args, **kwargs):
         # During sync apply, persist only. Re-running the distribution would
@@ -615,7 +647,8 @@ class CommissionPayment(SyncModel):
                     previous._release()
                 paid = self._allocate()
                 if kwargs.get('update_fields') is not None:
-                    kwargs['update_fields'] = {*kwargs['update_fields'], 'allocations', 'sync_updated_at'}
+                    kwargs['update_fields'] = {*kwargs['update_fields'], 'allocations',
+                                               'cancelled', 'sync_updated_at'}
             super().save(*args, **kwargs)
             if paid is not None:
                 self.commissions.set(paid)
@@ -663,10 +696,13 @@ class CommissionPayment(SyncModel):
             paid.append(commission)
             remaining -= pay
         self.allocations = allocations
+        # Distributed afresh, it pays only commissions that still exist.
+        self.cancelled = {}
         return paid
 
     def _release(self):
-        """Take this payment back out of the commissions it paid."""
+        """Take this payment back out of the commissions it paid, and so out
+        of what is owed back of it."""
         def take_back(commission, amount):
             amount = min(amount, commission.paid_amount)
             if amount > 0:
@@ -674,6 +710,10 @@ class CommissionPayment(SyncModel):
                 commission.save(update_fields=['paid_amount', 'sync_updated_at'])
             return amount
 
+        cancelled, owed_back = self.cancelled, self.owed_back
+        if cancelled:
+            CommissionPayment.objects.filter(pk=self.pk).update(cancelled={})
+            self.cancelled = {}
         if self.allocations:
             commissions = {str(c.sale.sync_id): c for c in Commission.objects.filter(
                 employee_id=self.employee_id, sale__sync_id__in=list(self.allocations),
@@ -681,14 +721,16 @@ class CommissionPayment(SyncModel):
             for sale_sync_id, amount in self.allocations.items():
                 commission = commissions.get(sale_sync_id)
                 if commission is not None:  # else its sale is gone, and it with it
-                    take_back(commission, Decimal(amount))
+                    # Not what of it is owed back: that no longer pays it.
+                    take_back(commission, Decimal(amount) - Decimal(cancelled.get(sale_sync_id, '0')))
             return
         # Recorded before splits were kept: take it back from the commissions
-        # it is linked to, newest first, then from the newest others.
+        # it is linked to, newest first, then from the newest others. Not what
+        # is owed back of it, though: that no longer pays any.
         linked = list(self.commissions.order_by('-created_at', '-pk'))
         others = (Commission.objects.filter(employee_id=self.employee_id)
                   .exclude(pk__in=[c.pk for c in linked]).order_by('-created_at', '-pk'))
-        remaining = Decimal(str(self.amount))
+        remaining = Decimal(str(self.amount)) - owed_back
         for commission in [*linked, *others]:
             if remaining <= 0:
                 break
@@ -696,6 +738,105 @@ class CommissionPayment(SyncModel):
 
     def __str__(self):
         return f"Commission Payment {self.amount} to {self.employee.name} at {self.paid_at}"
+
+def commission_owed_back(commission, amount=None):
+    """What the employee would owe back of each payment were ``amount`` of what
+    ``commission`` was paid cancelled (all of it when None, as when its sale is
+    deleted), as (payment, share) pairs: newest payment first, each for what it
+    still pays toward the commission."""
+    key = str(commission.sale.sync_id)
+    payments = list(CommissionPayment.objects.filter(employee_id=commission.employee_id)
+                    .order_by('-paid_at', '-pk'))
+    owed, left = [], amount
+
+    def owe(payment, available):
+        nonlocal left
+        share = available if left is None else min(available, left)
+        if share <= 0:
+            return Decimal('0')
+        owed.append((payment, share))
+        if left is not None:
+            left -= share
+        return share
+
+    # One that recorded its split still pays its share, less what of it is
+    # owed back already.
+    recorded = Decimal('0')
+    for payment in payments:
+        if key in payment.allocations:
+            live = max(Decimal(payment.allocations[key])
+                       - Decimal(payment.cancelled.get(key, '0')), Decimal('0'))
+            recorded += live
+            owe(payment, live)
+    # One recorded before splits were kept is linked to the commissions it paid
+    # instead: what of the paid amount no split accounts for came from those.
+    # Paid by no recorded payment at all, it can't be owed back.
+    unrecorded = commission.paid_amount - recorded
+    linked = set(commission.payments.values_list('pk', flat=True))
+    for payment in payments:
+        if unrecorded <= 0 or (left is not None and left <= 0):
+            break
+        if payment.pk in linked and not payment.allocations:
+            unrecorded -= owe(payment, min(unrecorded, payment.amount - payment.owed_back))
+    return owed
+
+def _add_owed_back(payment, key, amount):
+    """Add ``amount`` (take it off, when negative) to what ``payment`` owes back
+    of the commission on the sale ``key``."""
+    owed = Decimal(payment.cancelled.get(key, '0')) + amount
+    cancelled = {k: v for k, v in payment.cancelled.items() if k != key}
+    if owed > 0:
+        cancelled[key] = str(_cents(owed))
+    payment.cancelled = cancelled
+    # sync_updated_at too, so the laptops pull it (see _allocate).
+    payment.save(update_fields=['cancelled', 'sync_updated_at'])
+
+def owe_back_commission(commission, amount=None):
+    """Cancel ``amount`` of what ``commission`` was paid (all of it when None,
+    before it is deleted with its sale): the money stays paid out, so the
+    employee owes it back. Each payment records its share in ``cancelled``,
+    which takes it off the unpaid commission of the payment's period, below
+    zero when nothing there is unpaid. Returns how much was cancelled."""
+    key = str(commission.sale.sync_id)
+    owed = commission_owed_back(commission, amount)
+    for payment, share in owed:
+        _add_owed_back(payment, key, share)
+    return sum((share for _, share in owed), Decimal('0'))
+
+def _restore_owed_back(commission, amount):
+    """Undo up to ``amount`` of what was cancelled of ``commission``'s paid
+    amount, oldest payment first (the reverse of how it was cancelled), so it
+    pays the commission again. Returns how much."""
+    key = str(commission.sale.sync_id)
+    left = amount
+    for payment in (CommissionPayment.objects.filter(employee_id=commission.employee_id)
+                    .order_by('paid_at', 'pk')):
+        if left <= 0:
+            break
+        share = min(Decimal(payment.cancelled.get(key, '0')), left)
+        if share > 0:
+            _add_owed_back(payment, key, -share)
+            left -= share
+    return amount - left
+
+def _settle_paid_amount(commission, amount):
+    """Before ``commission`` changes to ``amount`` (a return on its sale, say):
+    what it was paid beyond a lower amount is owed back, and a higher one
+    first takes back what was owed back of it. Only the change counts: one
+    paid beyond its amount before (by an older return) stays so."""
+    old, paid = commission.amount, commission.paid_amount
+    if amount < old:
+        beyond = min(paid, old) - amount
+        if beyond > 0:
+            commission.paid_amount -= owe_back_commission(commission, beyond)
+    elif amount > old:
+        commission.paid_amount += _restore_owed_back(commission, amount - old)
+
+def owe_back_sale_commissions(sale):
+    """``owe_back_commission`` for each paid commission of ``sale``: any
+    employee's, as a sale moved to another one keeps the old one's paid part."""
+    for commission in Commission.objects.filter(sale=sale, paid_amount__gt=0).select_related('sale'):
+        owe_back_commission(commission)
 
 @receiver(post_save, sender=Employee)
 def update_employee_commissions(sender, instance, **kwargs):

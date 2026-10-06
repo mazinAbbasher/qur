@@ -932,6 +932,29 @@ def sale_detail(request, pk):
         "active_sidebar": "sales"
     })
 
+def _sale_commission_owed_back(sale):
+    """(employee, amount) for each employee who would owe back what they were
+    paid of ``sale``'s commission, were it deleted."""
+    from .models import commission_owed_back
+    owed = []
+    commissions = Commission.objects.filter(sale=sale, paid_amount__gt=0).select_related('employee', 'sale')
+    for commission in commissions:
+        amount = sum((a for _, a in commission_owed_back(commission)), Decimal('0'))
+        if amount > 0:
+            owed.append((commission.employee, amount))
+    return owed
+
+
+def _sale_manager_commissions(sale):
+    """(manager, amount) for each manager earning a share of ``sale``: it comes
+    off their commission for its month when the sale is deleted."""
+    from .models import commission_for
+    if not sale.employee_id:
+        return []
+    return [(manager, commission_for(sale.total, manager.commission_percentage))
+            for manager in sale.employee.managers.filter(commission_percentage__gt=0)]
+
+
 def sale_delete(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
     invoice = getattr(sale, 'invoice', None)
@@ -942,10 +965,12 @@ def sale_delete(request, pk):
         can_delete = False
         errors.append("لا يمكن حذف فاتورة تم سداد جزء منها. الرجاء حذف المدفوعات أولاً.")
 
-    # Any employee's: a sale moved to another employee keeps the old one's paid part.
-    if Commission.objects.filter(sale=sale, paid_amount__gt=0).exists():
-        can_delete = False
-        errors.append("لا يمكن حذف فاتورة تم دفع عمولتها للمندوب.")
+    # A commission already paid doesn't stop it: deleting the sale makes the
+    # employee owe that back (see Sale.delete). Commissions are for managers' eyes.
+    owed_back, manager_commissions = [], []
+    if is_manager(request.user):
+        owed_back = _sale_commission_owed_back(sale)
+        manager_commissions = _sale_manager_commissions(sale)
 
     if request.method == 'POST':
         if not can_delete:
@@ -963,12 +988,17 @@ def sale_delete(request, pk):
                 item.inventory.save()
             sale.delete()
         messages.success(request, "تم حذف الفاتورة بنجاح واسترجاع الكميات للمخزن.")
+        for employee, amount in owed_back:
+            messages.warning(request, f"خُصم {amount} من عمولة المندوب {employee.name} غير المدفوعة، "
+                                      f"لأن عمولة الفاتورة المحذوفة كانت مدفوعة له.")
         return redirect('panel:sale_list')
 
     return render(request, 'sales/sale_confirm_delete.html', {
         'sale': sale,
         'can_delete': can_delete,
         'errors': errors,
+        'owed_back': owed_back,
+        'manager_commissions': manager_commissions,
         "active_sidebar": "sales"
     })
 
@@ -1143,6 +1173,16 @@ def sale_edit(request, pk):
         "active_sidebar": "sales"
     })
 
+def _sale_owed_back(sale):
+    """{employee: amount} owed back of what was paid toward ``sale``'s commissions."""
+    from .models import CommissionPayment
+    key = str(sale.sync_id)
+    owed = defaultdict(Decimal)
+    for payment in CommissionPayment.objects.filter(cancelled__has_key=key).select_related('employee'):
+        owed[payment.employee] += Decimal(payment.cancelled[key])
+    return owed
+
+
 @require_POST
 def sale_return_product(request, pk):
     sale = get_object_or_404(Sale, pk=pk)
@@ -1150,8 +1190,16 @@ def sale_return_product(request, pk):
     if form.is_valid():
         returned = form.save(commit=False)
         returned.sale = sale
+        owed_before = _sale_owed_back(sale) if is_manager(request.user) else None
         returned.save()  # recalculates the sale total and its commission
         messages.success(request, f"تم تسجيل إرجاع {returned.quantity} وحدة من {returned.sale_item.inventory.product.name}.")
+        # A return taking the commission below what was paid charges the rest back.
+        if owed_before is not None:
+            for employee, owed in _sale_owed_back(sale).items():
+                charged = owed - owed_before.get(employee, Decimal('0'))
+                if charged > 0:
+                    messages.warning(request, f"خُصم {charged} من عمولة المندوب {employee.name} غير المدفوعة، "
+                                              f"لأن عمولة الفاتورة كانت مدفوعة له قبل الإرجاع.")
     else:
         for error in form.errors.values():
             messages.error(request, error)

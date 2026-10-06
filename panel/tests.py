@@ -16,6 +16,7 @@ from django.contrib.auth.models import Group
 from django.contrib.messages import get_messages
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils.timezone import localtime
 
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
@@ -696,14 +697,23 @@ class CommissionTests(SaleFormTestMixin, TestCase):
         self.assertEqual((old.amount, old.unpaid_amount), (Decimal('100'), Decimal('0')))
         self.assertEqual(self._amount(sale, other), Decimal('300'))
 
-    def test_paid_commission_of_any_employee_blocks_delete(self):
+    def test_paid_part_of_any_employee_is_owed_back_on_delete(self):
         sale = self._sell(3)
+        local = localtime(sale.created_at)
+        payment = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('100'),
+            period_month=local.month, period_year=local.year)
+        # Moved to another employee since (e.g. on a salesperson laptop): the
+        # paid part stays the first one's.
         other = Employee.objects.create(name='Other', commission_percentage=Decimal('5'))
-        self._reassign(sale, other)
-        Commission.objects.filter(employee=self.employee, sale=sale).update(
-            amount=Decimal('100'), paid_amount=Decimal('100'))
+        sale.employee = other
+        sale.calculate_total()
         self.client.post(reverse('panel:sale_delete', args=[sale.pk]))
-        self.assertTrue(Sale.objects.filter(pk=sale.pk).exists())
+        self.assertFalse(Sale.objects.filter(pk=sale.pk).exists())
+        payment.refresh_from_db()
+        self.assertEqual(payment.owed_back, Decimal('100'))
+        self.assertEqual(self.employee.get_unpaid_commission(local.month, local.year), Decimal('-100'))
+        self.assertEqual(other.get_unpaid_commission(local.month, local.year), Decimal('0'))
 
     @override_settings(SYNC_ROLE='salesperson')
     def test_salesperson_laptop_leaves_commissions_to_server(self):
@@ -1302,3 +1312,378 @@ class RecordAllocationsMigrationTests(TestCase):
         self.assertEqual(payment.allocations, {})
         self.commissions[6].refresh_from_db()
         self.assertEqual(self.commissions[6].paid_amount, Decimal('5000'))
+
+
+@override_settings(SYNC_ROLE='server')
+class SaleDeleteOwesBackCommissionTests(TestCase):
+    """A sale whose commission was already paid can still be deleted: the
+    employee owes back what they were paid of it, which comes off their unpaid
+    commission for the month it was paid for, below zero when nothing is left.
+    The 10% employee has two September sales: 500 and 10000 of commission."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.manager_user = User.objects.create_user('boss', password='pw12345!x')
+        self.manager_user.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.client.force_login(self.manager_user)
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.small = self.sale('5000', day=1)
+        self.big = self.sale('100000', day=10)
+
+    def sale(self, total, day, month=9):
+        sale = Sale.objects.create(employee=self.employee, total=Decimal(total),
+                                   created_at=_local(2026, month, day))
+        self.employee.recalculate_commissions()
+        return sale
+
+    def unpaid(self, month=9):
+        return self.employee.get_unpaid_commission(month=month, year=2026)
+
+    def pay(self, amount, month=9):
+        return CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal(amount), period_month=month, period_year=2026)
+
+    def delete_sale(self, sale):
+        return self.client.post(reverse('panel:sale_delete', args=[sale.pk]))
+
+    def edit(self, payment, amount, note=''):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal('1e9')):
+            return self.client.post(reverse('panel:commission_payment_edit', args=[payment.pk]), {
+                'amount': amount, 'period_month': 9, 'period_year': 2026, 'note': note})
+
+    def sdg_balance(self):
+        from finance.views import calculate_company_balance
+        return calculate_company_balance(Currency.objects.get(code='SDG'))
+
+    # --- what is owed back ----------------------------------------------------
+
+    def test_paid_commission_comes_off_what_is_unpaid(self):
+        payment = self.pay('500')  # the older sale's commission, in full
+        self.assertEqual(self.unpaid(), Decimal('10000'))
+        resp = self.delete_sale(self.small)
+        self.assertRedirects(resp, reverse('panel:sale_list'), fetch_redirect_response=False)
+        self.assertFalse(Sale.objects.filter(pk=self.small.pk).exists())
+        self.assertEqual(self.unpaid(), Decimal('9500'))
+        payment.refresh_from_db()
+        self.assertEqual((payment.amount, payment.owed_back), (Decimal('500'), Decimal('500')))
+
+    def test_nothing_left_unpaid_goes_below_zero(self):
+        self.pay('10500')
+        self.assertEqual(self.unpaid(), Decimal('0'))
+        self.delete_sale(self.small)
+        self.assertEqual(self.unpaid(), Decimal('-500'))
+
+    def test_unpaid_part_simply_goes_with_the_sale(self):
+        self.pay('200')  # 200 of the older sale's 500
+        self.assertEqual(self.unpaid(), Decimal('10300'))
+        self.delete_sale(self.small)
+        self.assertEqual(self.unpaid(), Decimal('9800'))
+
+    def test_other_months_untouched(self):
+        june = self.sale('30000', day=10, month=6)
+        self.pay('3000', month=6)
+        self.delete_sale(june)
+        self.assertEqual((self.unpaid(6), self.unpaid(9)), (Decimal('-3000'), Decimal('10500')))
+
+    def test_money_paid_out_stays_paid_out(self):
+        self.pay('500')
+        before = self.sdg_balance()
+        self.delete_sale(self.small)
+        self.assertEqual(self.sdg_balance(), before)
+
+    def test_commission_paid_by_no_payment_is_not_owed_back(self):
+        # Marked paid with no payment behind it: no money went out for it.
+        Commission.objects.filter(sale=self.small).update(paid_amount=Decimal('500'))
+        self.delete_sale(self.small)
+        self.assertFalse(Sale.objects.filter(pk=self.small.pk).exists())
+        self.assertEqual(self.unpaid(), Decimal('10000'))
+
+    def test_customer_payment_still_blocks_delete(self):
+        invoice = Invoice.objects.create(sale=self.small, total=Decimal('5000'))
+        InvoicePayment.objects.create(invoice=invoice, amount=Decimal('1000'))
+        self.pay('500')
+        self.delete_sale(self.small)
+        self.assertTrue(Sale.objects.filter(pk=self.small.pk).exists())
+        self.assertEqual(CommissionPayment.objects.get().owed_back, Decimal('0'))
+
+    # --- the payment afterwards -----------------------------------------------
+
+    def test_what_is_owed_back_caps_the_next_payment(self):
+        self.pay('500')
+        self.delete_sale(self.small)
+        url = reverse('panel:commission_pay', args=[self.employee.pk])
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal('1e9')):
+            self.client.post(url, {'amount': '10000', 'period_month': 9, 'period_year': 2026})
+            self.assertEqual(CommissionPayment.objects.count(), 1)
+            self.client.post(url, {'amount': '9500', 'period_month': 9, 'period_year': 2026})
+        self.assertEqual(self.unpaid(), Decimal('0'))
+
+    def test_deleting_the_payment_cancels_what_is_owed_back(self):
+        payment = self.pay('500')
+        self.delete_sale(self.small)
+        before = self.sdg_balance()
+        self.client.post(reverse('panel:commission_payment_delete', args=[payment.pk]))
+        self.assertEqual(self.unpaid(), Decimal('10000'))
+        self.assertEqual(self.sdg_balance(), before + Decimal('500'))
+        self.assertEqual(Commission.objects.get(sale=self.big).paid_amount, Decimal('0'))
+
+    def test_edited_payment_pays_what_is_left(self):
+        payment = self.pay('500')
+        self.delete_sale(self.small)
+        self.edit(payment, '400')
+        payment.refresh_from_db()
+        self.assertEqual((payment.allocations, payment.cancelled),
+                         ({str(self.big.sync_id): '400.00'}, {}))
+        self.assertEqual(self.unpaid(), Decimal('9600'))
+
+    def test_note_edit_keeps_what_is_owed_back(self):
+        payment = self.pay('500')
+        self.delete_sale(self.small)
+        self.edit(payment, '500', note='cash')
+        payment.refresh_from_db()
+        self.assertEqual((payment.note, payment.owed_back), ('cash', Decimal('500')))
+        self.assertEqual(self.unpaid(), Decimal('9500'))
+
+    def test_edit_page_room_leaves_out_its_own_debt(self):
+        payment = self.pay('500')
+        self.delete_sale(self.small)
+        resp = self.client.get(reverse('panel:commission_payment_edit', args=[payment.pk]))
+        self.assertContains(resp, '10,000.00')  # all of the other sale's
+        self.assertEqual(self.unpaid(), Decimal('9500'))  # showing it changed nothing
+
+    def test_payment_from_before_splits_were_kept_is_owed_back_too(self):
+        # As the old code left it: no split, just linked to what it paid.
+        with apply_guard():
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal('600'), paid_at=_local(2026, 9, 20))
+        for sale, paid in ((self.small, '500'), (self.big, '100')):
+            commission = Commission.objects.get(sale=sale)
+            Commission.objects.filter(pk=commission.pk).update(paid_amount=Decimal(paid))
+            payment.commissions.add(commission)
+        self.delete_sale(self.small)
+        payment.refresh_from_db()
+        self.assertEqual(payment.owed_back, Decimal('500'))
+        self.assertEqual(self.unpaid(), Decimal('9400'))
+        # Deleting it now takes back only what it paid of the sale still there.
+        self.client.post(reverse('panel:commission_payment_delete', args=[payment.pk]))
+        self.assertEqual(Commission.objects.get(sale=self.big).paid_amount, Decimal('0'))
+        self.assertEqual(self.unpaid(), Decimal('10000'))
+
+    # --- pages ----------------------------------------------------------------
+
+    def test_confirmation_page_tells_what_is_owed_back(self):
+        self.pay('500')
+        resp = self.client.get(reverse('panel:sale_delete', args=[self.small.pk]))
+        self.assertContains(resp, 'عمولة هذه الفاتورة مدفوعة للمندوب Rep (500.00)')
+        self.assertNotContains(resp, 'لا يمكن حذف')
+        resp = self.delete_sale(self.small)
+        self.assertEqual(
+            [str(m) for m in get_messages(resp.wsgi_request) if m.level_tag == 'warning'],
+            ['خُصم 500.00 من عمولة المندوب Rep غير المدفوعة، لأن عمولة الفاتورة المحذوفة كانت مدفوعة له.'])
+
+    def test_salesperson_sees_no_commission_but_it_is_still_owed_back(self):
+        self.pay('500')
+        rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+        self.client.force_login(rep)
+        resp = self.client.get(reverse('panel:sale_delete', args=[self.small.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'مدفوعة للمندوب')
+        self.delete_sale(self.small)
+        self.assertEqual(self.unpaid(), Decimal('9500'))
+
+    def test_employee_page_explains_what_is_owed_back(self):
+        self.pay('10500')
+        self.delete_sale(self.small)
+        resp = self.client.get(reverse('panel:employee_detail', args=[self.employee.pk]),
+                               {'month': 9, 'year': 2026})
+        self.assertContains(resp, 'منها 500.00 عن عمولات أُلغيت')
+        self.assertContains(resp, '(مستحق على المندوب)')
+
+    def test_manager_commission_follows_the_deleted_sale(self):
+        from panel.views import _manager_unpaid_commission
+        boss = Manager.objects.create(name='Boss', commission_percentage=Decimal('2'))
+        boss.employees.add(self.employee)
+        ManagerCommissionPayment.objects.create(  # 2% of 105000: all of it
+            manager=boss, amount=Decimal('2100'), period_month=9, period_year=2026)
+        resp = self.client.get(reverse('panel:sale_delete', args=[self.small.pk]))
+        self.assertContains(resp, 'تنقص عمولة المدير Boss لشهر 2026-09 بمقدار 100.00')
+        self.delete_sale(self.small)
+        self.assertEqual(_manager_unpaid_commission(boss, 9, 2026), Decimal('-100'))
+
+    # --- sync -----------------------------------------------------------------
+
+    @override_settings(SYNC_ROLE='manager')
+    def test_laptop_queues_the_payment_with_the_deletion(self):
+        payment = self.pay('500')
+        commission = Commission.objects.get(sale=self.small)
+        SyncOutbox.objects.all().delete()
+        self.delete_sale(self.small)
+        queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
+        self.assertIn(('panel.CommissionPayment', str(payment.sync_id), False), queued)
+        self.assertIn(('panel.Commission', str(commission.sync_id), True), queued)
+        self.assertIn(('panel.Sale', str(self.small.sync_id), True), queued)
+
+
+@override_settings(SYNC_ROLE='server')
+class ReturnOwesBackCommissionTests(SaleFormTestMixin, TestCase):
+    """A return taking a commission below what it was paid: the employee owes
+    the difference back, and removing the return undoes it. The 10% employee
+    sold 3 units at 2000: 600 of commission."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        data = self._data([self._row(self.inv_a, 3)])
+        data['employee'] = self.employee.pk
+        self.client.post(reverse('panel:sale_create'), data)
+        self.sale = Sale.objects.get()
+        self.item = self.sale.items.get()
+        local = localtime(self.sale.created_at)
+        self.month, self.year = local.month, local.year
+
+    def commission(self):
+        commission = Commission.objects.get(employee=self.employee, sale=self.sale)
+        return commission.amount, commission.paid_amount
+
+    def unpaid(self):
+        return self.employee.get_unpaid_commission(self.month, self.year)
+
+    def pay(self, amount):
+        return CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal(amount),
+            period_month=self.month, period_year=self.year)
+
+    def owed_back(self, payment):
+        payment.refresh_from_db()
+        return payment.owed_back
+
+    def return_units(self, quantity):
+        return self.client.post(reverse('panel:sale_return_product', args=[self.sale.pk]),
+                                {'sale_item': self.item.pk, 'quantity': quantity, 'note': ''})
+
+    def warnings(self, resp):
+        return [str(m) for m in get_messages(resp.wsgi_request) if m.level_tag == 'warning']
+
+    def test_return_on_a_paid_commission_is_owed_back(self):
+        payment = self.pay('600')
+        self.return_units(1)  # 400 of commission now
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('400')))
+        self.assertEqual(self.owed_back(payment), Decimal('200'))
+        self.assertEqual(self.unpaid(), Decimal('-200'))
+
+    def test_unpaid_part_takes_the_return_first(self):
+        payment = self.pay('300')
+        self.return_units(1)  # 400: still more than was paid
+        self.assertEqual(self.owed_back(payment), Decimal('0'))
+        self.assertEqual(self.unpaid(), Decimal('100'))
+
+    def test_only_what_was_paid_beyond_the_new_amount(self):
+        payment = self.pay('500')
+        self.return_units(1)
+        self.assertEqual(self.owed_back(payment), Decimal('100'))
+        self.assertEqual(self.unpaid(), Decimal('-100'))
+
+    def test_newest_payment_owes_it_back_first(self):
+        first, second = self.pay('400'), self.pay('200')
+        self.return_units(1)
+        self.assertEqual((self.owed_back(first), self.owed_back(second)), (Decimal('0'), Decimal('200')))
+
+    def test_removing_the_return_undoes_it(self):
+        payment = self.pay('600')
+        self.return_units(1)
+        ReturnedProduct.objects.get().delete()
+        self.assertEqual(self.commission(), (Decimal('600'), Decimal('600')))
+        self.assertEqual((self.owed_back(payment), self.unpaid()), (Decimal('0'), Decimal('0')))
+
+    def test_removing_one_of_two_returns(self):
+        payment = self.pay('600')
+        self.return_units(1)
+        self.return_units(1)  # 200 left of the 600 paid
+        self.assertEqual(self.owed_back(payment), Decimal('400'))
+        ReturnedProduct.objects.order_by('pk').first().delete()
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('400')))
+        self.assertEqual((self.owed_back(payment), self.unpaid()), (Decimal('200'), Decimal('-200')))
+
+    def test_older_overpayment_stays_as_it_was(self):
+        payment = self.pay('600')
+        with mock.patch('panel.models._settle_paid_amount'):
+            self.return_units(1)  # as the old code left it: 400, with 600 paid
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('600')))
+        self.return_units(1)  # 200: only this return's 200 is owed back
+        self.assertEqual(self.owed_back(payment), Decimal('200'))
+        self.assertEqual(self.unpaid(), Decimal('-200'))
+        ReturnedProduct.objects.order_by('pk').last().delete()
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('600')))
+        self.assertEqual(self.owed_back(payment), Decimal('0'))
+
+    def test_deleting_the_payment_after_a_return(self):
+        payment = self.pay('600')
+        self.return_units(1)
+        self.client.post(reverse('panel:commission_payment_delete', args=[payment.pk]))
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('0')))
+        self.assertEqual(self.unpaid(), Decimal('400'))
+
+    def test_deleting_the_payment_that_owes_it_back_keeps_the_others(self):
+        first, second = self.pay('400'), self.pay('200')
+        self.return_units(1)  # the newer one owes its 200 back
+        self.client.post(reverse('panel:commission_payment_delete', args=[second.pk]))
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('400')))  # the older one's
+        self.assertEqual((self.owed_back(first), self.unpaid()), (Decimal('0'), Decimal('0')))
+
+    def test_editing_the_payment_after_a_return(self):
+        payment = self.pay('600')
+        self.return_units(1)
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal('1e9')):
+            self.client.post(reverse('panel:commission_payment_edit', args=[payment.pk]), {
+                'amount': '400', 'period_month': self.month, 'period_year': self.year})
+        payment.refresh_from_db()
+        self.assertEqual((payment.amount, payment.owed_back), (Decimal('400'), Decimal('0')))
+        self.assertEqual(self.commission(), (Decimal('400'), Decimal('400')))
+        self.assertEqual(self.unpaid(), Decimal('0'))
+
+    def test_deleting_the_sale_after_a_return_owes_back_the_rest(self):
+        payment = self.pay('600')
+        self.return_units(1)
+        self.client.post(reverse('panel:sale_delete', args=[self.sale.pk]))
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
+        self.assertEqual(self.owed_back(payment), Decimal('600'))
+        self.assertEqual(self.unpaid(), Decimal('-600'))
+
+    def test_manager_is_told_what_the_return_charged(self):
+        self.pay('600')
+        message = 'خُصم 200.00 من عمولة المندوب Rep غير المدفوعة، لأن عمولة الفاتورة كانت مدفوعة له قبل الإرجاع.'
+        self.assertEqual(self.warnings(self.return_units(1)), [message])
+        self.client.get(reverse('panel:sale_detail', args=[self.sale.pk]))  # shows it, done
+        self.assertEqual(self.warnings(self.return_units(1)), [message])  # the next one's own
+
+    def test_nothing_said_when_nothing_is_charged(self):
+        self.pay('300')
+        self.assertEqual(self.warnings(self.return_units(1)), [])
+
+    def test_salesperson_return_is_charged_without_showing_it(self):
+        self.pay('600')
+        rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+        self.client.force_login(rep)
+        self.assertEqual(self.warnings(self.return_units(1)), [])
+        self.assertEqual(self.unpaid(), Decimal('-200'))
+
+    def test_manager_commission_follows_the_return(self):
+        from panel.views import _manager_unpaid_commission
+        boss = Manager.objects.create(name='Boss', commission_percentage=Decimal('2'))
+        boss.employees.add(self.employee)
+        ManagerCommissionPayment.objects.create(  # 2% of 6000: all of it
+            manager=boss, amount=Decimal('120'), period_month=self.month, period_year=self.year)
+        self.return_units(1)
+        self.assertEqual(_manager_unpaid_commission(boss, self.month, self.year), Decimal('-40'))
+
+    @override_settings(SYNC_ROLE='manager')
+    def test_laptop_queues_the_payment_with_the_return(self):
+        payment = self.pay('600')
+        SyncOutbox.objects.all().delete()
+        self.return_units(1)
+        queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
+        commission = Commission.objects.get(sale=self.sale)
+        self.assertIn(('panel.CommissionPayment', str(payment.sync_id), False), queued)
+        self.assertIn(('panel.Commission', str(commission.sync_id), False), queued)

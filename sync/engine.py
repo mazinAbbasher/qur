@@ -324,6 +324,8 @@ def _apply_row(label, row, *, is_pull, node_name, stats):
     # is_deleted, so a soft-deleted row would otherwise linger as a ghost.
     if incoming_deleted:  # existing is not None here (None handled above)
         inv_pks = _affected_inventory_pks(label, existing)
+        if not is_pull:
+            _owe_back_commissions(label, existing)
         existing.delete()
         # Record the deletion so it propagates to other nodes via pull.
         SyncTombstone.objects.update_or_create(model_label=label, sync_id=sync_id)
@@ -368,6 +370,21 @@ def _affected_inventory_pks(label, obj):
             if si.inventory_id:
                 pks.add(si.inventory_id)
     return pks
+
+
+def _owe_back_commissions(label, obj):
+    """Server side, before a pushed deletion of a sale or a commission: what the
+    commission was paid is owed back, as when deleting it here (see
+    panel.models.owe_back_commission). A salesperson laptop holds no
+    commissions, so a sale it deleted still has its paid one here; a manager
+    laptop's may have been paid here since it last pulled. What that laptop
+    already owed back (its payments arrive in the same push) isn't owed twice."""
+    from panel.models import owe_back_commission, owe_back_sale_commissions
+
+    if label == 'panel.Sale':
+        owe_back_sale_commissions(obj)
+    elif label == 'panel.Commission' and obj.paid_amount > 0:
+        owe_back_commission(obj)
 
 
 def _recompute_inventory(inv, node_name):

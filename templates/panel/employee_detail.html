@@ -34,7 +34,7 @@
               <div class="mb-2"><span class="font-semibold">الهدف الشهري:</span> {{ sales_target|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold">نسبة العمولة:</span> {{ commission_percentage|floatformat:2 }}%</div>
               <div class="mb-2"><span class="font-semibold">قيمة العمولة:</span> {{ commission_amount|floatformat:2|intcomma }}</div>
-              <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}</div>
+              <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}{% if unpaid_commission < 0 %} <span class="text-xs text-danger">(مستحق على المندوب)</span>{% endif %}</div>
               {% endif %}
             </div>
             {% if is_manager %}
@@ -90,7 +90,9 @@
                 {% for payment in commission_payments %}
                 <tr>
                   <td class="px-4 py-2">{{ payment.paid_at|date:"Y-m-d H:i" }}</td>
-                  <td class="px-4 py-2">{{ payment.amount|floatformat:2|intcomma }}</td>
+                  <td class="px-4 py-2">{{ payment.amount|floatformat:2|intcomma }}
+                    {% if payment.owed_back %}<div class="text-xs text-danger">منها {{ payment.owed_back|floatformat:2|intcomma }} عن عمولات أُلغيت (فواتير محذوفة أو مرتجعات)، مستحقة على المندوب</div>{% endif %}
+                  </td>
                   <td class="px-4 py-2">{{ payment.note }}</td>
                   <td class="px-4 py-2 whitespace-nowrap">
                     <a href="{% url 'panel:commission_payment_edit' payment.pk %}" class="btn btn-sm btn-outline-primary mb-0">تعديل</a>
