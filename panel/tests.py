@@ -268,16 +268,20 @@ class InvoicePaymentDeleteTests(TestCase):
         self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
         self.assertFalse(Invoice.objects.filter(pk=self.invoice.pk).exists())
 
-    def test_salesperson_cannot_delete_payment(self):
+    def test_salesperson_deletes_payment_and_then_the_sale(self):
         self.client.force_login(self.rep)
         resp = self.client.post(self.url)
-        self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp['Location'], reverse('panel:sale_list'))
-        self.assertTrue(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+        self.assertRedirects(resp, reverse('panel:sale_detail', args=[self.sale.pk]),
+                             fetch_redirect_response=False)
+        self.assertFalse(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.status, 'unpaid')
+        self.client.post(reverse('panel:sale_delete', args=[self.sale.pk]))
+        self.assertFalse(Sale.objects.filter(pk=self.sale.pk).exists())
 
     def test_salesperson_cannot_mark_unpaid(self):
-        # mark_unpaid wipes every payment, so it must not bypass the
-        # manager-only rule on deleting a single payment.
+        # mark_unpaid wipes every payment at once and no page links to it: it
+        # stays a manager's tool, reps delete payments one at a time.
         self.client.force_login(self.rep)
         resp = self.client.post(reverse('panel:invoice_mark_unpaid', args=[self.invoice.pk]))
         self.assertEqual(resp.status_code, 302)
@@ -294,14 +298,15 @@ class InvoicePaymentDeleteTests(TestCase):
         self.assertEqual(resp.status_code, 404)
         self.assertTrue(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
 
-    def test_delete_button_shown_to_manager_only(self):
-        for name in ('panel:sale_detail', 'panel:invoice_detail'):
-            pk = self.sale.pk if name == 'panel:sale_detail' else self.invoice.pk
-            page = reverse(name, args=[pk])
-            self.client.force_login(self.manager)
-            self.assertContains(self.client.get(page), self.url)
-            self.client.force_login(self.rep)
-            self.assertNotContains(self.client.get(page), self.url)
+    def test_edit_and_delete_shown_to_everyone(self):
+        edit_url = reverse('panel:invoice_edit_payment', args=[self.invoice.pk, self.payment.pk])
+        for page in (reverse('panel:sale_detail', args=[self.sale.pk]),
+                     reverse('panel:invoice_detail', args=[self.invoice.pk])):
+            for user in (self.manager, self.rep):
+                self.client.force_login(user)
+                resp = self.client.get(page)
+                self.assertContains(resp, self.url)
+                self.assertContains(resp, edit_url)
 
     def test_get_not_allowed(self):
         self.client.force_login(self.manager)
@@ -326,6 +331,109 @@ class InvoicePaymentDeleteTests(TestCase):
         # The other customer's invoice is untouched by the redirect target.
         self.assertTrue(InvoicePayment.objects.filter(invoice=self.invoice).exists())
         self.assertEqual(Invoice.objects.get(pk=other.pk).status, 'unpaid')
+
+
+@override_settings(SYNC_ROLE='server')
+class InvoicePaymentEditTests(TestCase):
+    """A payment recorded with the wrong amount or note can be corrected, by a
+    salesperson as well as a manager, without ever paying the invoice beyond
+    its total. A 1000 sale with a 400 payment."""
+
+    @classmethod
+    def setUpTestData(cls):
+        User = get_user_model()
+        cls.manager = User.objects.create_user('boss', password='pw12345!x')
+        cls.manager.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        cls.rep = User.objects.create_user('rep', password='pw12345!x')
+        cls.rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+
+    def setUp(self):
+        self.sale = Sale.objects.create(total=Decimal('1000'))
+        self.invoice = Invoice.objects.create(sale=self.sale, total=Decimal('1000'))
+        self.payment = InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('400'))
+        self.url = reverse('panel:invoice_edit_payment', args=[self.invoice.pk, self.payment.pk])
+        self.client.force_login(self.rep)
+
+    def edit(self, amount, note=''):
+        return self.client.post(self.url, {'amount': amount, 'note': note})
+
+    def state(self):
+        self.payment.refresh_from_db()
+        self.invoice.refresh_from_db()
+        return self.payment.amount, self.invoice.status
+
+    def errors(self, resp):
+        return resp.context['form'].errors.get('amount', [])
+
+    def test_salesperson_corrects_the_amount(self):
+        resp = self.edit('300', note='cash')
+        self.assertRedirects(resp, reverse('panel:sale_detail', args=[self.sale.pk]),
+                             fetch_redirect_response=False)
+        self.assertEqual(self.state(), (Decimal('300'), 'partial'))
+        self.assertEqual(self.payment.note, 'cash')
+
+    def test_manager_corrects_it_too(self):
+        self.client.force_login(self.manager)
+        self.edit('250')
+        self.assertEqual(self.state(), (Decimal('250'), 'partial'))
+
+    def test_paying_the_full_total_marks_it_paid(self):
+        self.edit('1000')
+        self.assertEqual(self.state(), (Decimal('1000'), 'paid'))
+        self.edit('999')
+        self.assertEqual(self.state(), (Decimal('999'), 'partial'))
+
+    def test_never_beyond_the_invoice_total(self):
+        InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('500'))  # 100 left
+        resp = self.edit('501')  # its own 400 + the 100 left is the most
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.errors(resp), ['المبلغ المدفوع أكبر من المتبقي على الفاتورة.'])
+        self.assertEqual(self.state(), (Decimal('400'), 'partial'))
+        self.edit('500')
+        self.assertEqual(self.state(), (Decimal('500'), 'paid'))
+
+    def test_amount_must_be_a_positive_number(self):
+        for amount in ('0', '-5', 'abc', ''):
+            self.assertEqual(self.edit(amount).status_code, 200)
+        self.assertEqual(self.state(), (Decimal('400'), 'partial'))
+
+    def test_overpaid_invoice_can_still_be_lowered(self):
+        Sale.objects.filter(pk=self.sale.pk).update(total=Decimal('300'))  # a later return
+        self.assertEqual(self.edit('450').status_code, 200)  # would overpay it further
+        self.edit('400', note='checked')  # just the note
+        self.assertEqual(self.state(), (Decimal('400'), 'paid'))
+        self.assertEqual(self.payment.note, 'checked')
+        self.edit('300')
+        self.assertEqual(self.state(), (Decimal('300'), 'paid'))
+
+    def test_payment_must_belong_to_invoice(self):
+        other = Invoice.objects.create(sale=Sale.objects.create(total=50), total=50)
+        resp = self.client.post(reverse('panel:invoice_edit_payment', args=[other.pk, self.payment.pk]),
+                                {'amount': '10'})
+        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(self.state(), (Decimal('400'), 'partial'))
+
+    def test_page_shows_the_payment_and_the_most_it_may_be(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'المبلغ الحالي: 400.00')
+        self.assertContains(resp, 'أقصى مبلغ: 1,000.00')
+
+    @override_settings(SYNC_ROLE='salesperson')
+    def test_laptop_queues_the_correction_with_the_invoice(self):
+        SyncOutbox.objects.all().delete()
+        self.edit('300')
+        queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
+        self.assertEqual(queued, {('panel.InvoicePayment', str(self.payment.sync_id), False),
+                                  ('panel.Invoice', str(self.invoice.sync_id), False)})
+
+    @override_settings(SYNC_ROLE='salesperson')
+    def test_laptop_queues_the_deletion_with_the_invoice(self):
+        SyncOutbox.objects.all().delete()
+        self.client.post(reverse('panel:invoice_delete_payment', args=[self.invoice.pk, self.payment.pk]))
+        queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
+        self.assertEqual(queued, {('panel.InvoicePayment', str(self.payment.sync_id), True),
+                                  ('panel.Invoice', str(self.invoice.sync_id), False)})
 
 
 class SaleFormTestMixin:

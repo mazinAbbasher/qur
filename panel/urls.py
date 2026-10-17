@@ -94,6 +94,7 @@ urlpatterns = [
     path('invoices/<int:pk>/pdf/', views.invoice_pdf, name='invoice_pdf'),
     path('invoices/<int:pk>/add_payment/', views.invoice_add_payment, name='invoice_add_payment'),
     path('invoices/<int:pk>/payments/<int:payment_pk>/delete/', views.invoice_delete_payment, name='invoice_delete_payment'),
+    path('invoices/<int:pk>/payments/<int:payment_pk>/edit/', views.invoice_edit_payment, name='invoice_edit_payment'),
 
     path('debts/', views.debts_view, name='debts'),
 

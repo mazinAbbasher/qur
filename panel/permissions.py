@@ -4,8 +4,9 @@ Two roles exist, implemented with Django auth Groups so no custom user model
 is required:
 
   * ``manager``     - full access (also implicitly any superuser).
-  * ``salesperson`` - restricted: may create sales, manage clients, record
-                      payments/returns, record currency exchanges and view
+  * ``salesperson`` - restricted: may create, edit and delete sales, manage
+                      clients, record and correct payments, record returns,
+                      record currency exchanges and view
                       inventory/prices, but must NOT see purchase costs,
                       profit, commissions or finance data (company balances,
                       partners).
@@ -105,9 +106,9 @@ MANAGER_ONLY_VIEWS = {
     'panel:manager_add', 'panel:manager_edit', 'panel:manager_delete',
     'panel:supplier_add', 'panel:supplier_edit', 'panel:supplier_delete',
     'panel:supplier_add_payment',
-    # Removing recorded customer payments rewrites what was collected.
-    'panel:invoice_delete_payment',
-    'panel:invoice_mark_unpaid',          # deletes ALL of an invoice's payments
+    # Reps correct the customer payments they record, editing or deleting one
+    # at a time; wiping all of an invoice's payments at once stays a manager's.
+    'panel:invoice_mark_unpaid',
 }
 
 # Whole URL trees that are manager-only (the finance app: balances, partners).

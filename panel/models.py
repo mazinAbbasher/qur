@@ -457,16 +457,18 @@ class Invoice(SyncModel):
                     break
         super().save(*args, **kwargs)
 
-    def update_status(self):
-        from decimal import Decimal
+    def computed_status(self):
+        """'paid', 'partial' or 'unpaid', from its payments against the sale's (net) total."""
         net_total = Decimal(str(self.sale.total))
         paid = self.paid_amount
         if paid >= net_total and net_total > 0:
-            self.status = 'paid'
-        elif paid > 0:
-            self.status = 'partial'
-        else:
-            self.status = 'unpaid'
+            return 'paid'
+        if paid > 0:
+            return 'partial'
+        return 'unpaid'
+
+    def update_status(self):
+        self.status = self.computed_status()
         self.save(update_fields=['status'])
 
     @property

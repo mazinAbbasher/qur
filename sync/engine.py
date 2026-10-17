@@ -11,6 +11,9 @@ Guarantees (this is where "reliable, no duplicates, no clobbering" lives):
 * **Authoritative stock** — after the server applies pushed sales/returns, the
   affected inventory quantities are recomputed from source rows (idempotent).
   An oversell is clamped to zero and logged, never left negative.
+* **Authoritative invoice status** — after the server applies pushed payments,
+  each touched invoice's paid/partial/unpaid status is derived from the
+  payments it holds, not taken from a laptop that may not have seen them all.
 * **Ordered + resilient FKs** — rows apply parents-first; a row whose foreign
   key isn't present yet is retried once, then logged as a missing reference.
 * **Deletes win** — a laptop pushing its stale copy of a row the server already
@@ -432,6 +435,22 @@ def _update_commissions(sale_pks, employee_pks):
         employee.recalculate_commissions(rerate_partly_paid=False)
 
 
+def _recompute_invoice_statuses(invoice_pks):
+    """Server side, after applying a push: derive the status of each invoice
+    whose payments it touched from the payments held here. A laptop pushes the
+    status it worked out from the payments it knew of, which is stale when
+    another laptop changed them meanwhile (one lowered or deleted a payment
+    while another added one)."""
+    from panel.models import Invoice
+
+    for invoice in Invoice.objects.filter(pk__in=invoice_pks).select_related('sale'):
+        status = invoice.computed_status()
+        if invoice.status != status:
+            invoice.status = status
+            # sync_updated_at too, so the laptops pull the corrected status.
+            invoice.save(update_fields=['status', 'sync_updated_at'])
+
+
 @transaction.atomic
 def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
     """Apply serialized ``rows`` and return a stats dict.
@@ -449,6 +468,16 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
     touched_inventory_pks = set()
     pushed_sale_pks = set()
     pushed_employee_pks = set()
+    pushed_invoice_pks = set()
+
+    if not is_pull:
+        # A deleted payment is gone once applied: note its invoice first.
+        deleted_payments = [r['sync_id'] for r in by_label.get('panel.InvoicePayment', ())
+                            if r.get('is_deleted')]
+        if deleted_payments:
+            from panel.models import InvoicePayment
+            pushed_invoice_pks.update(InvoicePayment.objects.filter(
+                sync_id__in=deleted_payments).values_list('invoice_id', flat=True))
 
     def _note_inventory(label, obj):
         if obj is None:
@@ -466,6 +495,10 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
                 pushed_sale_pks.add(result.pk)
             elif label == 'panel.Employee':
                 pushed_employee_pks.add(result.pk)
+            elif label == 'panel.Invoice':
+                pushed_invoice_pks.add(result.pk)
+            elif label == 'panel.InvoicePayment':
+                pushed_invoice_pks.add(result.invoice_id)
         if not authoritative_inventory:
             return
         if status == 'applied':
@@ -503,6 +536,8 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
 
         if pushed_sale_pks or pushed_employee_pks:
             _update_commissions(pushed_sale_pks, pushed_employee_pks)
+        if pushed_invoice_pks:
+            _recompute_invoice_statuses(pushed_invoice_pks)
 
         # Authoritative stock recompute (server side, after applying a push).
         # select_for_update serialises concurrent pushes touching the same batch

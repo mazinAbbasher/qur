@@ -2067,14 +2067,25 @@ class InvoicePaymentForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.invoice = kwargs.pop('invoice', None)
         super().__init__(*args, **kwargs)
+        # An edited payment's own amount is free again for its new one.
+        self.current = self.instance.amount if self.instance.pk else Decimal('0')
+        self.fields['amount'].widget.attrs['class'] = 'form-control'
+        self.fields['note'].widget.attrs['class'] = 'form-control'
         if self.invoice:
-            self.fields['amount'].widget.attrs['max'] = float(self.invoice.remaining_amount)
+            self.fields['amount'].widget.attrs['max'] = float(self.most)
             self.fields['amount'].widget.attrs['min'] = 1
             self.fields['amount'].widget.attrs['step'] = '0.01'
 
+    @property
+    def most(self):
+        """The largest amount allowed: what is left on the invoice (plus the
+        payment's own amount, when editing). An edit may always lower a
+        payment, even on an invoice already overpaid (by a later return, say)."""
+        return max(self.invoice.remaining_amount + self.current, self.current)
+
     def clean_amount(self):
         amount = self.cleaned_data['amount']
-        if self.invoice and amount > self.invoice.remaining_amount:
+        if self.invoice and amount > self.most:
             raise forms.ValidationError("المبلغ المدفوع أكبر من المتبقي على الفاتورة.")
         if amount <= 0:
             raise forms.ValidationError("يجب أن يكون المبلغ أكبر من صفر.")
@@ -2117,6 +2128,26 @@ def invoice_delete_payment(request, pk, payment_pk):
     payment.delete()
     messages.success(request, f"تم حذف الدفعة بمبلغ {amount}.")
     return redirect('panel:sale_detail', pk=invoice.sale.pk)
+
+def invoice_edit_payment(request, pk, payment_pk):
+    # Correct a payment's amount or note. Its save() re-derives the invoice
+    # status, and sync pushes the change like any other edit.
+    invoice = get_object_or_404(Invoice, pk=pk)
+    payment = get_object_or_404(InvoicePayment, pk=payment_pk, invoice=invoice)
+    if request.method == 'POST':
+        form = InvoicePaymentForm(request.POST, instance=payment, invoice=invoice)
+        if form.is_valid():
+            form.save()
+            messages.success(request, f"تم تعديل الدفعة إلى {payment.amount}.")
+            return redirect('panel:sale_detail', pk=invoice.sale.pk)
+    else:
+        form = InvoicePaymentForm(instance=payment, invoice=invoice)
+    return render(request, 'invoices/invoice_payment_form.html', {
+        'form': form,
+        'invoice': invoice,
+        'payment': payment,
+        "active_sidebar": "sales",
+    })
 
 @require_POST
 def invoice_mark_paid(request, pk):

@@ -524,7 +524,8 @@ class ApplySideEffectTests(SyncSetup):
     """A pushed row must persist without firing its model's side effects during
     apply. InvoicePayment.save() used to call invoice.update_status() mid-apply,
     whose stray print crashed the whole push on a server with a closed stdout
-    (``OSError: [Errno 5]``). The status instead rides in on the Invoice row.
+    (``OSError: [Errno 5]``). The status rides in on the Invoice row instead,
+    and the server checks it against its payments once the batch is in.
     """
 
     def _invoice(self):
@@ -534,20 +535,22 @@ class ApplySideEffectTests(SyncSetup):
         return Invoice.objects.create(sale=sale, total=Decimal('2000'),
                                       status='unpaid')
 
-    def test_pushed_payment_persists_without_recomputing_status(self):
+    def test_pushed_payment_persists_and_status_follows_after_the_batch(self):
         invoice = self._invoice()
         pay_id = uuid.uuid4()
 
-        stats = apply_batch(
-            [row('panel.InvoicePayment', pay_id, invoice=str(invoice.sync_id),
-                 amount='500', paid_at='2026-08-07T10:00:00+00:00')],
-            is_pull=False, node_name='rep-1', authoritative_inventory=True)
+        with mock.patch('panel.models.Invoice.update_status') as update_status:
+            stats = apply_batch(
+                [row('panel.InvoicePayment', pay_id, invoice=str(invoice.sync_id),
+                     amount='500', paid_at='2026-08-07T10:00:00+00:00')],
+                is_pull=False, node_name='rep-1', authoritative_inventory=True)
 
         self.assertEqual(stats['applied'], 1)
         self.assertTrue(InvoicePayment.objects.filter(sync_id=pay_id).exists())
+        update_status.assert_not_called()  # no model side effect mid-apply
         invoice.refresh_from_db()
-        # update_status() was skipped during apply -> status untouched here.
-        self.assertEqual(invoice.status, 'unpaid')
+        # Derived from the payments here once the batch was applied.
+        self.assertEqual(invoice.status, 'partial')
 
     def test_status_arrives_via_the_pushed_invoice_row(self):
         invoice = self._invoice()
@@ -1120,3 +1123,80 @@ class ReturnOwesBackSyncTests(SyncSetup):
             self.sale_row('4000000'),
         ])
         self.assertEqual(self.state(), (Decimal('400000'), Decimal('400000'), Decimal('100000')))
+
+
+class PaymentCorrectionSyncTests(SyncSetup):
+    """A salesperson's corrected or deleted payment reaches the server and the
+    other laptops, and the invoice status there follows the payments the
+    server holds, even when two laptops changed them between syncs. A 1000
+    sale with a 400 payment."""
+
+    def setUp(self):
+        super().setUp()
+        self.sale = Sale.objects.create(total=Decimal('1000'))
+        self.invoice = Invoice.objects.create(sale=self.sale, total=Decimal('1000'))
+        self.payment = InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('400'))
+
+    def payment_row(self, sync_id, amount):
+        return row('panel.InvoicePayment', sync_id, invoice=str(self.invoice.sync_id),
+                   amount=amount, paid_at='2026-10-10T10:00:00+00:00')
+
+    def invoice_row(self, status):
+        return row('panel.Invoice', self.invoice.sync_id, sale=str(self.sale.sync_id),
+                   total='1000', status=status, number=self.invoice.number)
+
+    def status(self):
+        self.invoice.refresh_from_db()
+        return self.invoice.status
+
+    def pulled(self, token, cursor, label):
+        return [r for r in self.pull(token, cursor).json()['changes'] if r['label'] == label]
+
+    def test_correction_reaches_the_server_and_the_other_laptops(self):
+        cursor = self.pull('tok-mgr').json()['cursor']
+        self.push('tok-sales', [self.payment_row(self.payment.sync_id, '1000'),
+                                self.invoice_row('paid')])
+        self.payment.refresh_from_db()
+        self.assertEqual((self.payment.amount, self.status()), (Decimal('1000'), 'paid'))
+        changes = self.pull('tok-mgr', cursor).json()['changes']
+        fields = {r['label']: r['fields'] for r in changes}
+        self.assertEqual(fields['panel.InvoicePayment']['amount'], '1000.00')
+        self.assertEqual(fields['panel.Invoice']['status'], 'paid')
+
+    def test_deletion_reaches_the_server_and_the_other_laptops(self):
+        cursor = self.pull('tok-mgr').json()['cursor']
+        self.push('tok-sales', [row('panel.InvoicePayment', self.payment.sync_id, deleted=True),
+                                self.invoice_row('unpaid')])
+        self.assertFalse(InvoicePayment.objects.filter(pk=self.payment.pk).exists())
+        self.assertEqual(self.status(), 'unpaid')
+        self.assertEqual([r['is_deleted'] for r in self.pulled('tok-mgr', cursor, 'panel.InvoicePayment')],
+                         [True])
+
+    def test_stale_status_from_another_laptop_is_corrected(self):
+        # A rep lowered the payment to 300 and synced...
+        self.push('tok-sales', [self.payment_row(self.payment.sync_id, '300'),
+                                self.invoice_row('partial')])
+        cursor = self.pull('tok-mgr').json()['cursor']
+        # ...while the manager, still seeing 400, took the last 600 to pay it.
+        self.push('tok-mgr', [self.payment_row(uuid.uuid4(), '600'), self.invoice_row('paid')])
+        self.assertEqual(self.status(), 'partial')  # 900 of 1000
+        self.assertEqual([r['fields']['status'] for r in self.pulled('tok-mgr', cursor, 'panel.Invoice')],
+                         ['partial'])
+
+    def test_deletion_alone_corrects_the_status(self):
+        InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('600'))
+        self.assertEqual(self.status(), 'paid')
+        # A laptop that never saw the 600 deletes the 400 and pushes no invoice row.
+        self.push('tok-sales', [row('panel.InvoicePayment', self.payment.sync_id, deleted=True)])
+        self.assertEqual(self.status(), 'partial')
+
+    def test_right_status_is_left_alone(self):
+        stamp = Invoice.objects.get(pk=self.invoice.pk).sync_updated_at
+        self.push('tok-sales', [self.payment_row(uuid.uuid4(), '100')])  # 500: still partial
+        self.invoice.refresh_from_db()
+        self.assertEqual((self.invoice.status, self.invoice.sync_updated_at), ('partial', stamp))
+
+    def test_pulled_payments_leave_the_status_to_the_server(self):
+        # Laptop side: the server's own invoice row brings the status.
+        apply_batch([self.payment_row(uuid.uuid4(), '600')], is_pull=True, node_name='mgr-1')
+        self.assertEqual(self.status(), 'partial')
