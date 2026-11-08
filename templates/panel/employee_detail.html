@@ -30,14 +30,11 @@
           <div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="bg-gray-50 rounded p-4">
               <div class="mb-2"><span class="font-semibold">مبيعات الشهر:</span> {{ total_sales|floatformat:2|intcomma }}</div>
-              {% if is_manager %}
               <div class="mb-2"><span class="font-semibold">الهدف الشهري:</span> {{ sales_target|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold">نسبة العمولة:</span> {{ commission_percentage|floatformat:2 }}%</div>
               <div class="mb-2"><span class="font-semibold">قيمة العمولة:</span> {{ commission_amount|floatformat:2|intcomma }}</div>
               <div class="mb-2"><span class="font-semibold text-danger">العمولة غير المدفوعة:</span> {{ unpaid_commission|floatformat:2|intcomma }}{% if unpaid_commission < 0 %} <span class="text-xs text-danger">(مستحق على المندوب)</span>{% endif %}</div>
-              {% endif %}
             </div>
-            {% if is_manager %}
             <div class="flex flex-col justify-center">
               <div class="mb-2 font-semibold">نسبة تحقيق الهدف:</div>
               <div class="w-full bg-gray-200 rounded h-8 relative overflow-hidden">
@@ -60,20 +57,29 @@
                 </div>
               </div>
             </div>
-            {% endif %}
           </div>
-          {% if is_manager %}
           <div class="mb-6">
             <h6 class="font-bold mt-6 mb-2 text-gray-700">دفع عمولة:</h6>
             <form method="post" action="{% url 'panel:commission_pay' employee.pk %}" class="flex flex-wrap gap-2 items-center">
               {% csrf_token %}
               <input type="hidden" name="period_month" value="{{ month }}">
               <input type="hidden" name="period_year" value="{{ year }}">
-              <input type="number" name="amount" step="0.01" min="1" max="{{ unpaid_commission }}" class="form-control w-32" placeholder="المبلغ" required>
+              <input type="number" name="amount" step="0.01" min="1" max="{{ payable_commission }}" class="form-control w-32" placeholder="المبلغ" required>
               <input type="text" name="note" class="form-control w-64" placeholder="ملاحظة (اختياري)">
               <button type="submit" class="btn btn-success">تسجيل دفعة عمولة</button>
             </form>
-            <div class="mt-2 text-muted text-xs">سيتم تسجيل الدفعة ضمن فترة العمولة المختارة: <strong>{{ year }}-{{ month }}</strong>. يمكنك دفع جزء أو كل العمولة غير المدفوعة.</div>
+            {% if other_months_unpaid %}
+            <div class="mt-3 bg-yellow-50 border border-yellow-200 rounded p-3 text-sm">
+              <div class="font-semibold mb-1">عمولات غير مدفوعة من أشهر أخرى:</div>
+              <ul class="mb-1">
+                {% for row in other_months_unpaid %}
+                <li><a href="?month={{ row.month }}&year={{ row.year }}" class="underline">{{ row.year }}-{{ row.month|stringformat:"02d" }}</a>: {{ row.unpaid|floatformat:2|intcomma }}</li>
+                {% endfor %}
+              </ul>
+              <div>الحد الأقصى للدفع (كل الأشهر): <strong>{{ payable_commission|floatformat:2|intcomma }}</strong></div>
+            </div>
+            {% endif %}
+            <div class="mt-2 text-muted text-xs">تُسدَّد عمولة الفترة المختارة (<strong>{{ year }}-{{ month }}</strong>) أولاً، وما يزيد عنها يُوزَّع تلقائياً على العمولات غير المدفوعة في الأشهر الأخرى، الأقدم أولاً، وتُسجَّل دفعة مستقلة لكل شهر.</div>
           </div>
           <div class="mb-6">
             <h6 class="font-bold mt-6 mb-2 text-gray-700">سجل دفعات العمولات:</h6>
@@ -111,7 +117,6 @@
               </tbody>
             </table>
           </div>
-          {% endif %}
           <h6 class="font-bold mt-6 mb-2 text-gray-700">المبيعات لهذا الشهر:</h6>
           <div class="overflow-x-auto">
             <table class="min-w-full divide-y divide-gray-200 border">
@@ -120,7 +125,7 @@
                   <th class="px-4 py-2 text-right font-bold">رقم البيع</th>
                   <th class="px-4 py-2 text-right font-bold">التاريخ</th>
                   <th class="px-4 py-2 text-right font-bold">القيمة</th>
-                  {% if is_manager %}<th class="px-4 py-2 text-right font-bold">عمولة</th>{% endif %}
+                  <th class="px-4 py-2 text-right font-bold">عمولة</th>
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-100">
@@ -129,7 +134,7 @@
                   <td class="px-4 py-2">{{ row.sale.pk }}</td>
                   <td class="px-4 py-2">{{ row.sale.created_at|date:"Y-m-d" }}</td>
                   <td class="px-4 py-2">{{ row.sale.total|floatformat:2|intcomma }}</td>
-                  {% if is_manager %}<td class="px-4 py-2">{{ row.commission|floatformat:2|intcomma }}</td>{% endif %}
+                  <td class="px-4 py-2">{{ row.commission|floatformat:2|intcomma }}</td>
                 </tr>
                 {% empty %}
                 <tr>

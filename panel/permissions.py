@@ -6,10 +6,10 @@ is required:
   * ``manager``     - full access (also implicitly any superuser).
   * ``salesperson`` - restricted: may create, edit and delete sales, manage
                       clients, record and correct payments, record returns,
-                      record currency exchanges and view
+                      record currency exchanges, manage commissions (staff
+                      and their percentages, commission payments) and view
                       inventory/prices, but must NOT see purchase costs,
-                      profit, commissions or finance data (company balances,
-                      partners).
+                      profit or finance data (company balances, partners).
 
 Access is enforced *default-deny* for salespeople in
 ``cafe.middleware.AccessControlMiddleware`` using the allowlist below, so a
@@ -71,39 +71,36 @@ def manager_required(view_func):
 
 
 # Salespeople get broad operational access. Only *purely financial* pages
-# (net profit, profit reports, commissions and the finance app apart from
-# currency exchange) stay manager-only. This is a blocklist: anything not
-# listed here is allowed, so salespeople can manage sales, clients, products,
-# inventory, shipments, employees, managers, suppliers, areas, lost products,
-# their own daily expenses and currency exchanges — but the cost/profit figures inside those pages are still hidden
-# (templates) and never reach a salesperson's laptop (sync strips them).
+# (net profit, profit reports and the finance app apart from currency
+# exchange) stay manager-only. This is a blocklist: anything not listed here
+# is allowed, so salespeople can manage sales, clients, products, inventory,
+# shipments, employees, managers, commissions, suppliers, areas, lost
+# products, their own daily expenses and currency exchanges — but the
+# cost/profit figures inside those pages are still hidden (templates) and
+# never reach a salesperson's laptop (sync strips them).
+#
+# Commissions (staff pay) are NOT here: reps view them, pay them, correct the
+# payments and set staff percentages. On a rep laptop the payments go through
+# the server, which checks the company's cash without showing it to them
+# (see sync.client.submit_commission_action).
 MANAGER_ONLY_VIEWS = {
     # Financial dashboards / profit reports
     'panel:index',                       # the net-profit / totals dashboard
     'panel:net_profit_dashboard',
     'panel:shipment_profit_report',
-    # Commissions (staff pay)
-    'panel:sale_commissions',
-    'panel:commission_pay',
-    'panel:manager_commission_pay',
-    'panel:commission_payment_edit', 'panel:commission_payment_delete',
-    'panel:manager_commission_payment_edit', 'panel:manager_commission_payment_delete',
-    'panel:get_employee_commission',
     # NOTE: expenses are intentionally NOT here — salespeople manage their own
     # daily field expenses (add/edit/delete/list/PDF). The company-wide expense
     # total stays private because expenses aren't synced back down to reps
     # (see panel.Expense in sync/registry.py), and the SDG balance guard in
     # expense_add/expense_edit is manager-only.
-    # Purchasing & staff/pay records are VIEW-ONLY for reps (they can open the
-    # lists/details, with cost/commission columns hidden, but not create/edit —
-    # those carry financial data and are manager functions).
+    # Purchasing records are VIEW-ONLY for reps (they can open the
+    # lists/details, with cost columns hidden, but not create/edit — those
+    # carry financial data and are manager functions).
     # Products are catalog/reference data (exchange rate drives cost conversion) —
     # reps view but don't edit.
     'panel:product_add', 'panel:product_edit', 'panel:product_delete',
     'panel:product_stock_movement', 'panel:product_stock_movement_pdf',
     'panel:shipment_create', 'panel:shipment_edit', 'panel:shipment_delete',
-    'panel:employee_add', 'panel:employee_edit', 'panel:employee_delete',
-    'panel:manager_add', 'panel:manager_edit', 'panel:manager_delete',
     'panel:supplier_add', 'panel:supplier_edit', 'panel:supplier_delete',
     'panel:supplier_add_payment',
     # Reps correct the customer payments they record, editing or deleting one

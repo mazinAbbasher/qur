@@ -8,8 +8,8 @@ A single middleware does two jobs:
 
 2. Enforces the salesperson access policy: salespeople have broad operational
    access and are blocked only from the manager-only financial pages listed in
-   ``panel.permissions`` (net profit, profit reports, commissions and the
-   finance app — except currency exchange, which reps may record). A blocked
+   ``panel.permissions`` (net profit, profit reports and the finance app —
+   except currency exchange, which reps may record). A blocked
    page redirects them back to their sales list.
    Managers and superusers are unrestricted.
 """

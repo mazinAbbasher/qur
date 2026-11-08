@@ -15,8 +15,8 @@ syncs:
   downloads the latest of everything.
 * **Salesperson** clicks **رفع بياناتي (Upload)** → uploads their new
   sales/clients/payments and downloads every sale, invoice, payment and return
-  (whoever made them) plus products, stock and prices — **never** purchase
-  costs or other sensitive data.
+  (whoever made them) plus products, stock, prices, staff and commissions —
+  **never** purchase costs or other sensitive data.
 
 Nothing is duplicated (records are matched by a global `sync_id`), nothing is
 silently overwritten (conflicts are logged for review), and stock is
@@ -152,8 +152,15 @@ Encrypt certificate. HTTPS is required — tokens travel in request headers.
 * **Review conflicts:** on the server (or manager laptop) visit
   `/admin/sync/syncconflict/` to see and resolve anything flagged.
 * **Sensitive data:** salespeople never receive purchase costs, supplier
-  balances, commissions, expenses or finance data — enforced in the views,
-  the templates, and again in the sync API.
+  balances, expenses or finance data — enforced in the views, the templates,
+  and again in the sync API.
+* **Commissions:** salespeople see and manage commissions (staff, their
+  percentages, commission payments). The server alone works commissions out.
+  A payment made on a salesperson laptop is sent straight to the server, which
+  checks it against the company's cash (never showing the balance) — so it
+  needs the internet. Staff edits sync up like sales; after an update a
+  salesperson laptop must sync once before staff or commissions can be changed
+  on it.
 
 ## Backups
 * Server: schedule `pg_dump equatorial` daily.
@@ -167,13 +174,15 @@ pages stay manager-only.
 |--------------------------------------------------------|:------:|:-----------:|
 | Sales, invoices, payments, returns                     |   ✓    |      ✓      |
 | Create/edit clients, products, areas, lost products    |   ✓    |      ✓      |
-| **View** shipments, suppliers, employees, managers     |   ✓    |  ✓ (no cost/commission figures) |
-| Create/edit shipments, suppliers, staff                |   ✓    |      ✗      |
+| **View** shipments, suppliers                          |   ✓    |  ✓ (no cost figures) |
+| Create/edit shipments, suppliers                       |   ✓    |      ✗      |
+| Staff (employees, managers) and their commission %     |   ✓    |      ✓      |
+| Commissions: view, pay, edit/delete payments           |   ✓    |  ✓ (paying needs internet) |
 | Purchase costs (USD/SDG), profit, net-profit dashboard |   ✓    |      ✗      |
-| Commissions, expenses, finance (balances/partners)     |   ✓    |      ✗      |
+| Expenses, finance (balances/partners)                  |   ✓    |      ✗      |
 
 > **Security note — salesperson laptops:** a salesperson laptop should start
-> from an **empty** database and pull from the server, so cost/commission data
+> from an **empty** database and pull from the server, so cost data
 > physically never lands on it (the sync strips those fields). Do **not** copy
 > the manager's full `db.sqlite3` onto a salesperson laptop — hiding a field in
 > the UI is not the same as it being absent from the local database file.

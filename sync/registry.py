@@ -9,7 +9,7 @@ For each syncable model we record:
 * ``salesperson_writable``   - may a *salesperson* laptop push this model up?
 * ``sensitive_fields``       - fields stripped before sending to a salesperson,
                                even when the row itself is readable (e.g. purchase
-                               costs on a shipment, commission % on an employee).
+                               costs on a shipment).
 
 ``SYNC_ORDER`` lists models parents-first so the apply step can insert a row
 only after the rows it points at already exist (and delete in reverse).
@@ -35,15 +35,15 @@ class SyncSpec:
 _SPECS = [
     # ---- Reference data (server is the authority; laptops pull it) ----------
     SyncSpec('panel.Area', 'reference', salesperson_readable=True, salesperson_writable=True),
-    # Suppliers, staff and shipments are READ-ONLY for salespeople. They carry
-    # financial meaning a rep can't see (costs/commissions), so letting a rep
-    # push them back would null those figures out on the server. Reps view them;
-    # only managers create/edit them.
+    # Suppliers and shipments are READ-ONLY for salespeople. They carry
+    # financial meaning a rep can't see (costs), so letting a rep push them
+    # back would null those figures out on the server. Reps view them; only
+    # managers create/edit them.
     SyncSpec('panel.Supplier', 'reference', salesperson_readable=True, salesperson_writable=False),
-    SyncSpec('panel.Employee', 'reference', salesperson_readable=True, salesperson_writable=False,
-             sensitive_fields=('commission_percentage', 'sales_target')),
-    SyncSpec('panel.Manager', 'reference', salesperson_readable=True, salesperson_writable=False,
-             sensitive_fields=('commission_percentage',)),
+    # Staff are managed by reps too, percentages included: nothing on them is
+    # withheld, so a rep's copy can be pushed back whole.
+    SyncSpec('panel.Employee', 'reference', salesperson_readable=True, salesperson_writable=True),
+    SyncSpec('panel.Manager', 'reference', salesperson_readable=True, salesperson_writable=True),
     SyncSpec('panel.ExchangeRate', 'reference', salesperson_readable=False, salesperson_writable=False),
     # View-only for salespeople: the catalog (and exchange rate, which drives
     # cost/price conversion) is manager-managed. Reps see products but can't edit.
@@ -52,9 +52,14 @@ _SPECS = [
              sensitive_fields=('cost_usd', 'cost_sdg', 'shipment_cost', 'supplier')),
     SyncSpec('panel.Inventory', 'reference', salesperson_readable=True, salesperson_writable=False),
     SyncSpec('panel.LostProduct', 'reference', salesperson_readable=True, salesperson_writable=True),
-    SyncSpec('panel.Commission', 'reference', salesperson_readable=False, salesperson_writable=False),
-    SyncSpec('panel.CommissionPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
-    SyncSpec('panel.ManagerCommissionPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
+    # Reps see commissions and their payments but never push them: the server
+    # works out commissions (a rep laptop doesn't, see
+    # panel.models.computes_commissions), and a rep's payment must pass the
+    # company's cash check first, so it goes through api_commission_payment
+    # (see sync/client.submit_commission_action).
+    SyncSpec('panel.Commission', 'reference', salesperson_readable=True, salesperson_writable=False),
+    SyncSpec('panel.CommissionPayment', 'reference', salesperson_readable=True, salesperson_writable=False),
+    SyncSpec('panel.ManagerCommissionPayment', 'reference', salesperson_readable=True, salesperson_writable=False),
     SyncSpec('panel.SupplierPayment', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.Currency', 'reference', salesperson_readable=False, salesperson_writable=False),
     SyncSpec('finance.Partner', 'reference', salesperson_readable=False, salesperson_writable=False),

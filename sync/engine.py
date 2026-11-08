@@ -378,8 +378,8 @@ def _affected_inventory_pks(label, obj):
 def _owe_back_commissions(label, obj):
     """Server side, before a pushed deletion of a sale or a commission: what the
     commission was paid is owed back, as when deleting it here (see
-    panel.models.owe_back_commission). A salesperson laptop holds no
-    commissions, so a sale it deleted still has its paid one here; a manager
+    panel.models.owe_back_commission). A salesperson laptop leaves that to
+    the server, so a sale it deleted still has its paid one here; a manager
     laptop's may have been paid here since it last pulled. What that laptop
     already owed back (its payments arrive in the same push) isn't owed twice."""
     from panel.models import owe_back_commission, owe_back_sale_commissions
@@ -420,19 +420,21 @@ def _recompute_inventory(inv, node_name):
     return False
 
 
-def _update_commissions(sale_pks, employee_pks):
+def _update_commissions(sale_pks, employee_pks, rerate_pks=()):
     """Server side, after applying a push: give every pushed sale its commission
-    (a salesperson laptop holds no commission percentages, so its sales arrive
-    without one) and apply a pushed percentage change to the sales the pushing
-    laptop hadn't pulled yet."""
+    (a salesperson laptop works out none, so its sales arrive without one) and
+    apply a pushed percentage change to the sales the pushing laptop hadn't
+    pulled yet."""
     from panel.models import Employee, Sale, update_sale_commission
 
     for sale in Sale.objects.filter(pk__in=sale_pks).select_related('employee'):
         update_sale_commission(sale)
-    # Partly paid commissions were already re-rated by the laptop that changed
-    # the percentage (and pushed in this batch); re-rating here would do it twice.
+    # Partly paid commissions were already re-rated by a manager laptop that
+    # changed the percentage (and pushed in this batch); re-rating here would
+    # do it twice. A salesperson laptop re-rates none, so the employees whose
+    # percentage it changed (``rerate_pks``) are re-rated here.
     for employee in Employee.objects.filter(pk__in=employee_pks):
-        employee.recalculate_commissions(rerate_partly_paid=False)
+        employee.recalculate_commissions(rerate_partly_paid=employee.pk in rerate_pks)
 
 
 def _recompute_invoice_statuses(invoice_pks):
@@ -452,12 +454,16 @@ def _recompute_invoice_statuses(invoice_pks):
 
 
 @transaction.atomic
-def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
+def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False,
+                node_computes_commissions=True):
     """Apply serialized ``rows`` and return a stats dict.
 
-    ``is_pull``                 - True when a laptop applies data from the server.
-    ``authoritative_inventory`` - True when the server applies a push (recompute
-                                  stock from source rows afterwards).
+    ``is_pull``                   - True when a laptop applies data from the server.
+    ``authoritative_inventory``   - True when the server applies a push (recompute
+                                    stock from source rows afterwards).
+    ``node_computes_commissions`` - False when the server applies a push from a
+                                    salesperson laptop, which works out no
+                                    commissions (see panel.models.computes_commissions).
     """
     stats = {'applied': 0, 'noop': 0, 'conflicts': 0, 'oversells': 0,
              'deferred_min': None}
@@ -468,7 +474,19 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
     touched_inventory_pks = set()
     pushed_sale_pks = set()
     pushed_employee_pks = set()
+    rerate_employee_pks = set()
     pushed_invoice_pks = set()
+
+    # The percentages a laptop that works out no commissions may be changing,
+    # read before the push overwrites them: a changed one re-rates the partly
+    # paid commissions here too (see _update_commissions).
+    old_percentages = {}
+    if not is_pull and not node_computes_commissions and by_label.get('panel.Employee'):
+        from panel.models import Employee
+        old_percentages = {
+            str(sync_id): percentage for sync_id, percentage in Employee.objects.filter(
+                sync_id__in=[r['sync_id'] for r in by_label['panel.Employee']],
+            ).values_list('sync_id', 'commission_percentage')}
 
     if not is_pull:
         # A deleted payment is gone once applied: note its invoice first.
@@ -495,6 +513,9 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
                 pushed_sale_pks.add(result.pk)
             elif label == 'panel.Employee':
                 pushed_employee_pks.add(result.pk)
+                old = old_percentages.get(str(result.sync_id))
+                if old is not None and Decimal(str(result.commission_percentage)) != old:
+                    rerate_employee_pks.add(result.pk)
             elif label == 'panel.Invoice':
                 pushed_invoice_pks.add(result.pk)
             elif label == 'panel.InvoicePayment':
@@ -535,7 +556,7 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False):
         stats['deferred_min'] = deferred_min
 
         if pushed_sale_pks or pushed_employee_pks:
-            _update_commissions(pushed_sale_pks, pushed_employee_pks)
+            _update_commissions(pushed_sale_pks, pushed_employee_pks, rerate_employee_pks)
         if pushed_invoice_pks:
             _recompute_invoice_statuses(pushed_invoice_pks)
 

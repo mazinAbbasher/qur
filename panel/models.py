@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils import timezone
 from decimal import Decimal
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import post_save, post_delete, pre_save
 from django.dispatch import receiver
 import random
 
@@ -80,6 +80,23 @@ class Employee(SyncModel):
         # zero when nothing is left to come off.
         owed_back = sum(p.owed_back for p in payments)
         return sum([c.unpaid_amount for c in commissions]) - owed_back
+
+    def get_outstanding_commissions(self, first=None):
+        """[((month, year), unpaid)] for each month with commission still to
+        pay (what get_unpaid_commission has unpaid for it, when above zero):
+        the ``first`` (month, year) before the others, which go oldest first.
+        A month owed back more than it has unpaid isn't listed."""
+        from django.db.models.functions import ExtractMonth, ExtractYear
+        months = (Commission.objects.filter(employee=self, amount__gt=models.F('paid_amount'))
+                  .annotate(year=ExtractYear('sale__created_at'), month=ExtractMonth('sale__created_at'))
+                  .values_list('month', 'year').distinct().order_by('year', 'month'))
+        outstanding = []
+        for month, year in months:
+            unpaid = self.get_unpaid_commission(month=month, year=year)
+            if unpaid > 0:
+                outstanding.append(((month, year), unpaid))
+        outstanding.sort(key=lambda o: o[0] != first)  # stable
+        return outstanding
 
     def recalculate_commissions(self, rerate_partly_paid=True):
         """Bring this employee's commissions in line with their current percentage.
@@ -334,12 +351,14 @@ class Sale(SyncModel):
         # Its commissions go with it, but what they were paid stays paid out:
         # the employee owes it back (see owe_back_commission). During sync
         # apply the payments arrive already updated; the server does it itself
-        # for a deletion pushed to it (see sync.engine).
+        # for a deletion pushed to it (see sync.engine), which is how a
+        # salesperson laptop's deletion gets it (see computes_commissions).
         from sync.tracking import sync_apply_active
         if sync_apply_active():
             return super().delete(*args, **kwargs)
         with transaction.atomic():
-            owe_back_sale_commissions(self)
+            if computes_commissions():
+                owe_back_sale_commissions(self)
             return super().delete(*args, **kwargs)
 
     def __str__(self):
@@ -565,8 +584,11 @@ def commission_for(total, percentage):
     return _cents(Decimal(str(total or 0)) * Decimal(str(percentage or 0)) / 100)
 
 def computes_commissions():
-    """A salesperson laptop never holds commission percentages (they're
-    stripped when syncing), so it leaves commissions to the server."""
+    """A salesperson laptop leaves commissions to the server: it shows the
+    ones it pulls, but works none out itself. Commission rows aren't pushed
+    from it, so the server's own figures would differ from the laptop's
+    anyway; and a laptop that hasn't synced since commissions were opened to
+    reps holds no commissions or percentages to work from."""
     return getattr(settings, 'SYNC_ROLE', 'standalone') != 'salesperson'
 
 def update_sale_commission(sale):
@@ -840,6 +862,16 @@ def owe_back_sale_commissions(sale):
     for commission in Commission.objects.filter(sale=sale, paid_amount__gt=0).select_related('sale'):
         owe_back_commission(commission)
 
+@receiver(pre_save, sender=Employee)
+def note_saved_commission_percentage(sender, instance, **kwargs):
+    """Note the percentage this save replaces, for update_employee_commissions."""
+    from sync.tracking import sync_apply_active
+    if sync_apply_active() or not instance.pk:
+        instance._replaced_percentage = None
+        return
+    instance._replaced_percentage = (Employee.objects.filter(pk=instance.pk)
+                                     .values_list('commission_percentage', flat=True).first())
+
 @receiver(post_save, sender=Employee)
 def update_employee_commissions(sender, instance, **kwargs):
     """
@@ -852,7 +884,15 @@ def update_employee_commissions(sender, instance, **kwargs):
     from sync.tracking import sync_apply_active
     if sync_apply_active():
         return
-    instance.recalculate_commissions()
+    # Every save fills in missing commissions and recomputes unpaid ones, but
+    # only a new percentage re-rates the unpaid part of a partly paid one: it
+    # works out the rate the commission was at from its amount, which an
+    # earlier re-rating left apart from any percentage, so saving the employee
+    # unchanged (a new name) would re-rate it again.
+    replaced = getattr(instance, '_replaced_percentage', None)
+    instance.recalculate_commissions(rerate_partly_paid=(
+        replaced is not None
+        and Decimal(str(instance.commission_percentage)) != replaced))
 
 class Manager(SyncModel):
     name = models.CharField(max_length=100, blank = False, null = False)

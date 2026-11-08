@@ -842,7 +842,7 @@ class ClientPullPolicyTests(SyncSetup):
 
 class PushedCommissionTests(SyncSetup):
     """The server gives pushed sales their commissions. A salesperson laptop
-    holds no commission percentages, so its sales arrive without one."""
+    works out none, so its sales arrive without one."""
 
     def setUp(self):
         super().setUp()
@@ -864,11 +864,11 @@ class PushedCommissionTests(SyncSetup):
         commission = self._commission(sale_uid)
         self.assertEqual(commission.amount, Decimal('500000'))
         self.assertEqual(commission.created_at, parse_datetime('2026-09-01T10:00:00+00:00'))
-        # It reaches the manager laptops; salespeople still never see commissions.
+        # It reaches every laptop: salespeople manage commissions too.
         def labels(token):
             return {r['label'] for r in self.pull(token).json()['changes']}
         self.assertIn('panel.Commission', labels('tok-mgr'))
-        self.assertNotIn('panel.Commission', labels('tok-sales'))
+        self.assertIn('panel.Commission', labels('tok-sales'))
 
     def test_pushed_total_change_updates_commission(self):
         sale_uid = uuid.uuid4()
@@ -1200,3 +1200,219 @@ class PaymentCorrectionSyncTests(SyncSetup):
         # Laptop side: the server's own invoice row brings the status.
         apply_batch([self.payment_row(uuid.uuid4(), '600')], is_pull=True, node_name='mgr-1')
         self.assertEqual(self.status(), 'partial')
+
+
+class SalespersonCommissionPolicyTests(SyncSetup):
+    """Salespeople manage commissions: they pull commissions, payments and
+    staff percentages, and push staff, but never commission rows (the server
+    works those out)."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.sales_target = Decimal('900')
+        self.employee.save()
+
+    def _push_sale(self, sale_uid, total):
+        return self.push('tok-sales', [
+            row('panel.Sale', sale_uid, employee=str(self.employee.sync_id),
+                created_at='2026-09-01T10:00:00+00:00', total=total),
+        ])
+
+    def _commission(self, sale_uid):
+        return Commission.objects.get(employee=self.employee, sale__sync_id=sale_uid)
+
+    def test_pull_sends_commissions_payments_and_percentages(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        CommissionPayment.objects.create(employee=self.employee, amount=Decimal('10'))
+        boss = Manager.objects.create(name='Boss', commission_percentage=Decimal('2'))
+        ManagerCommissionPayment.objects.create(manager=boss, amount=Decimal('5'))
+        changes = self.pull('tok-sales').json()['changes']
+        labels = {r['label'] for r in changes}
+        for label in ('panel.Commission', 'panel.CommissionPayment',
+                      'panel.ManagerCommissionPayment'):
+            self.assertIn(label, labels)
+        employee = next(r for r in changes if r['label'] == 'panel.Employee')
+        self.assertEqual(Decimal(employee['fields']['commission_percentage']), Decimal('10'))
+        self.assertEqual(Decimal(employee['fields']['sales_target']), Decimal('900'))
+        manager = next(r for r in changes if r['label'] == 'panel.Manager')
+        self.assertEqual(Decimal(manager['fields']['commission_percentage']), Decimal('2'))
+
+    def test_salesperson_pushes_staff_but_not_commission_rows(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        commission = self._commission(sale_uid)
+        resp = self.push('tok-sales', [
+            row('panel.Employee', self.employee.sync_id, name='Renamed'),
+            row('panel.Manager', uuid.uuid4(), name='New Boss', commission_percentage='3'),
+            row('panel.Commission', commission.sync_id, paid_amount='100'),
+            row('panel.CommissionPayment', uuid.uuid4(), employee=str(self.employee.sync_id),
+                amount='100'),
+        ])
+        self.assertEqual(sorted(resp.json()['rejected']),
+                         ['panel.Commission', 'panel.CommissionPayment'])
+        self.employee.refresh_from_db()
+        self.assertEqual(self.employee.name, 'Renamed')
+        self.assertTrue(Manager.objects.filter(name='New Boss').exists())
+        self.assertEqual(self._commission(sale_uid).paid_amount, Decimal('0'))
+        self.assertFalse(CommissionPayment.objects.exists())
+
+    def test_salesperson_percentage_change_rerates_partly_paid_here(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        Commission.objects.filter(sale__sync_id=sale_uid).update(paid_amount=Decimal('50'))
+        # The laptop re-rated nothing: the unpaid 50 goes from 10% to 20% here.
+        self.push('tok-sales', [row('panel.Employee', self.employee.sync_id,
+                                    commission_percentage='20')])
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('150'))
+
+    def test_salesperson_edit_keeping_the_percentage_rerates_nothing(self):
+        sale_uid = uuid.uuid4()
+        self._push_sale(sale_uid, '1000')
+        # Partly paid, and re-rated by an earlier percentage change.
+        Commission.objects.filter(sale__sync_id=sale_uid).update(
+            amount=Decimal('120'), paid_amount=Decimal('50'))
+        self.push('tok-sales', [row('panel.Employee', self.employee.sync_id,
+                                    name='Renamed', commission_percentage='10.00')])
+        self.assertEqual(self._commission(sale_uid).amount, Decimal('120'))
+
+
+class CommissionPaymentApiTests(SyncSetup):
+    """A salesperson laptop's commission payments are made by the server, as its
+    own pages would, against its own commissions and cash (api_commission_payment).
+    The 10% employee has a September sale: 500000 of commission."""
+
+    def setUp(self):
+        super().setUp()
+        self.employee.commission_percentage = Decimal('10')
+        self.employee.save()
+        self.sale = Sale.objects.create(
+            employee=self.employee, total=Decimal('5000000'),
+            created_at=parse_datetime('2026-09-10T10:00:00+00:00'))
+        self.employee.recalculate_commissions()
+        self.commission = Commission.objects.get(sale=self.sale)
+
+    def deposit_sdg(self, amount):
+        PartnerTransaction.objects.create(
+            partner=Partner.objects.create(full_name='P'), transaction_type='deposit',
+            amount=Decimal(amount), currency=Currency.objects.get(code='SDG'))
+
+    def post(self, action, target, token='tok-sales', **data):
+        from sync.serializers import model_label
+        body = {'action': action,
+                'target': {'label': model_label(type(target)), 'sync_id': str(target.sync_id)},
+                'data': {'month': 9, 'year': 2026, 'note': '', **data}}
+        return self.client.post(reverse('sync:api_commission_payment'),
+                                data=json.dumps(body), content_type='application/json',
+                                HTTP_X_SYNC_TOKEN=token)
+
+    def paid(self):
+        self.commission.refresh_from_db()
+        return self.commission.paid_amount
+
+    def test_pay_is_made_here(self):
+        self.deposit_sdg('1000000')
+        resp = self.post('pay', self.employee, amount='300000', note='cash')
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('300000', resp.json()['message'])
+        payment = CommissionPayment.objects.get()
+        self.assertEqual((payment.amount, payment.period_month, payment.note),
+                         (Decimal('300000'), 9, 'cash'))
+        self.assertEqual(self.paid(), Decimal('300000'))
+
+    def test_short_cash_refused_without_showing_the_balance(self):
+        self.deposit_sdg('12345')
+        resp = self.post('pay', self.employee, amount='300000')
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn('غير كافٍ', resp.json()['error'])
+        self.assertNotIn('12345', resp.json()['error'])
+        self.assertFalse(CommissionPayment.objects.exists())
+
+    def test_pay_over_the_unpaid_refused(self):
+        self.deposit_sdg('1000000')
+        resp = self.post('pay', self.employee, amount='500001')
+        self.assertEqual(resp.status_code, 409)
+        self.assertIn('500000', resp.json()['error'])
+        self.assertFalse(CommissionPayment.objects.exists())
+
+    def test_edit_then_delete(self):
+        payment = CommissionPayment.objects.create(
+            employee=self.employee, amount=Decimal('300000'), period_month=9, period_year=2026)
+        resp = self.post('edit', payment, amount='100000', note='fixed')
+        self.assertEqual(resp.status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual((payment.amount, payment.note), (Decimal('100000'), 'fixed'))
+        self.assertEqual(self.paid(), Decimal('100000'))
+
+        self.assertEqual(self.post('delete', payment).status_code, 200)
+        self.assertFalse(CommissionPayment.objects.exists())
+        self.assertEqual(self.paid(), Decimal('0'))
+        # The laptops hear of it, and a retry is no error.
+        self.assertTrue(SyncTombstone.objects.filter(sync_id=payment.sync_id).exists())
+        self.assertEqual(self.post('delete', payment).json()['ok'], True)
+
+    def test_manager_commission(self):
+        self.deposit_sdg('1000000')
+        boss = Manager.objects.create(name='Boss', commission_percentage=Decimal('2'))
+        boss.employees.add(self.employee)
+        self.assertEqual(self.post('pay', boss, amount='100001').status_code, 409)
+        self.assertEqual(self.post('pay', boss, amount='60000').status_code, 200)
+        payment = ManagerCommissionPayment.objects.get()
+        self.assertEqual(self.post('edit', payment, amount='100000').status_code, 200)
+        payment.refresh_from_db()
+        self.assertEqual(payment.amount, Decimal('100000'))
+        self.assertEqual(self.post('delete', payment).status_code, 200)
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+
+    def test_bad_requests(self):
+        payment = CommissionPayment.objects.create(employee=self.employee, amount=Decimal('1'))
+        self.assertEqual(self.post('pay', self.employee, token='nope', amount='1').status_code, 401)
+        self.assertEqual(self.post('refund', self.employee, amount='1').status_code, 400)
+        self.assertEqual(self.post('pay', payment, amount='1').status_code, 400)
+        self.assertEqual(self.post('edit', self.employee, amount='1').status_code, 400)
+        self.assertEqual(self.post('pay', self.employee, amount='lots').status_code, 400)
+        self.assertEqual(self.post('pay', self.employee, amount='NaN').status_code, 400)
+        self.assertEqual(self.post('pay', self.employee, amount='1', month=13).status_code, 400)
+        gone = Employee(name='Never synced')  # an id the server doesn't hold
+        self.assertEqual(self.post('pay', gone, amount='1').status_code, 409)
+
+
+class ClientCommissionActionTests(SyncSetup):
+    """Laptop side of api_commission_payment (sync.client.submit_commission_action)."""
+
+    def test_pushes_first_then_pulls_the_result(self):
+        from sync.client import submit_commission_action
+        calls = []
+        with mock.patch('sync.client.push', side_effect=lambda: calls.append('push')), \
+                mock.patch('sync.client.pull', side_effect=lambda: calls.append('pull')), \
+                mock.patch('sync.client._post', side_effect=lambda path, payload: (
+                    calls.append((path, payload)) or {'ok': True, 'message': 'done'})):
+            ok, message = submit_commission_action(
+                'pay', self.employee,
+                {'amount': Decimal('12.50'), 'month': 9, 'year': 2026, 'note': ''})
+        self.assertEqual((ok, message), (True, 'done'))
+        self.assertEqual(calls[0], 'push')
+        self.assertEqual(calls[1], ('/sync/api/commission-payment/', {
+            'action': 'pay',
+            'target': {'label': 'panel.Employee', 'sync_id': str(self.employee.sync_id)},
+            'data': {'amount': '12.50', 'month': 9, 'year': 2026, 'note': ''},
+        }))
+        self.assertEqual(calls[2], 'pull')
+
+    def test_failed_pull_still_reports_it_done(self):
+        from sync.client import submit_commission_action
+        with mock.patch('sync.client.push'), \
+                mock.patch('sync.client.pull', side_effect=ConnectionError), \
+                mock.patch('sync.client._post', return_value={'ok': True, 'message': 'done'}):
+            ok, message = submit_commission_action('delete', self.employee)
+        self.assertTrue(ok)
+        self.assertIn('بعد المزامنة القادمة', message)
+
+    def test_policy_check(self):
+        from sync.client import synced_with_current_policy
+        self.assertFalse(synced_with_current_policy())
+        state = SyncState.get()
+        state.pull_policy = registry.pull_policy('salesperson')
+        state.save()
+        self.assertTrue(synced_with_current_policy())

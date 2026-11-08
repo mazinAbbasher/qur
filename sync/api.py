@@ -124,6 +124,7 @@ def api_push(request):
         stats = apply_batch(
             accepted, is_pull=False, node_name=node.name,
             authoritative_inventory=True,
+            node_computes_commissions=node.role != 'salesperson',
         )
     except Exception as exc:
         SyncLog.objects.create(
@@ -202,3 +203,88 @@ def api_currency_exchange(request):
         pushed=1, ok=True, message=f'currency exchange {row.get("sync_id")}',
     )
     return JsonResponse({'ok': True})
+
+
+# What each commission-payment action is carried out on (see
+# panel.views.commission_action): the payee to pay, or the payment to change.
+_COMMISSION_TARGETS = {
+    'pay': ('panel.Employee', 'panel.Manager'),
+    'edit': ('panel.CommissionPayment', 'panel.ManagerCommissionPayment'),
+    'delete': ('panel.CommissionPayment', 'panel.ManagerCommissionPayment'),
+}
+
+
+def _commission_data(data):
+    """The amount, month, year and note a pay or edit was sent with, as
+    panel.views.commission_action takes them; None when they don't parse."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        amount = Decimal(str(data['amount']))
+        month, year = int(data['month']), int(data['year'])
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return None
+    if not amount.is_finite() or not 1 <= month <= 12 or not 2000 <= year <= 2100:
+        return None
+    return {'amount': amount, 'month': month, 'year': year,
+            'note': str(data.get('note') or '')[:255]}
+
+
+@csrf_exempt
+@require_POST
+def api_commission_payment(request):
+    """Pay a commission, or edit or delete a commission payment, for a laptop.
+
+    A salesperson laptop holds commissions only as it last pulled them, and
+    none of the company's cash a payment comes out of, so it can't do this
+    itself (reps never push commission rows). The server does it as its own
+    pages would, against its own figures, and replies with the message for
+    the rep's page: a refusal is a 409 whose message never shows the balance.
+    The laptop pulls the result afterwards.
+    """
+    from finance.models import Currency
+    from panel.views import commission_action
+
+    from .serializers import get_model
+
+    body = _load_body(request)
+    if body is None:
+        return JsonResponse({'ok': False, 'error': 'invalid_json'}, status=400)
+    node = _authenticate(request, body)
+    if node is None:
+        return JsonResponse({'ok': False, 'error': 'unauthorized'}, status=401)
+
+    action = body.get('action')
+    target = body.get('target') or {}
+    label = target.get('label')
+    if label not in _COMMISSION_TARGETS.get(action, ()):
+        return JsonResponse({'ok': False, 'error': 'invalid_action'}, status=400)
+    data = None
+    if action != 'delete':
+        data = _commission_data(body.get('data') or {})
+        if data is None:
+            return JsonResponse({'ok': False, 'error': 'invalid_data'}, status=400)
+    try:
+        obj = get_model(label).objects.filter(sync_id=target.get('sync_id')).first()
+    except Exception:  # not a valid sync_id
+        return JsonResponse({'ok': False, 'error': 'invalid_action'}, status=400)
+    if obj is None:
+        if action == 'delete':  # a retry, or someone else deleted it first
+            return JsonResponse({'ok': True, 'message': "دفعة العمولة محذوفة بالفعل."})
+        return JsonResponse({'ok': False, 'error': "لم يُعثر على السجل على الخادم. "
+                                                   "قم بمزامنة البيانات ثم حاول مرة أخرى."},
+                            status=409)
+
+    with transaction.atomic():
+        # Lock the SDG cash it is paid from, so two payments (or a payment and
+        # a currency exchange) can't both spend the same balance.
+        Currency.objects.select_for_update().filter(code='SDG').first()
+        ok, message = commission_action(action, obj, data, show_balance=False)
+    if not ok:
+        return JsonResponse({'ok': False, 'error': message}, status=409)
+
+    SyncLog.objects.create(
+        node_name=node.name, direction='push', finished_at=timezone.now(),
+        pushed=1, ok=True, message=f'commission {action} {label} {target.get("sync_id")}',
+    )
+    return JsonResponse({'ok': True, 'message': message})

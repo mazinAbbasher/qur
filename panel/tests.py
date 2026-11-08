@@ -4,6 +4,7 @@ Run with:  python manage.py test panel
 These use an isolated test database; the real db.sqlite3 is never touched.
 """
 
+import json
 import re
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from importlib import import_module
@@ -61,7 +62,9 @@ class AccessControlTests(TestCase):
                      # Reps log their own daily field expenses.
                      'panel:expense_list', 'panel:expense_add',
                      # ...and the currency exchanges they make.
-                     'currency_purchases_list', 'currency_purchase_add']:
+                     'currency_purchases_list', 'currency_purchase_add',
+                     # ...and manage staff and their commissions.
+                     'panel:employee_add', 'panel:manager_add']:
             resp = self.client.get(reverse(name))
             self.assertEqual(resp.status_code, 200, f"{name} should be allowed")
 
@@ -71,11 +74,9 @@ class AccessControlTests(TestCase):
         denied = [
             'panel:index', 'panel:net_profit_dashboard',
             'panel:shipment_profit_report',
-            'panel:sale_commissions',
             # view-only entities: create/edit blocked
             'panel:product_add',
-            'panel:shipment_create', 'panel:employee_add',
-            'panel:manager_add', 'panel:supplier_add',
+            'panel:shipment_create', 'panel:supplier_add',
             # rest of the finance app blocked by path prefix
             'financial_dashboard', 'partners_list', 'partner_add',
         ]
@@ -230,6 +231,126 @@ class SalespersonLaptopExchangeTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertIn('تعذّر الاتصال بالخادم', resp.content.decode())
         self.assertFalse(CurrencyExchange.objects.exists())
+
+
+@override_settings(SYNC_ROLE='salesperson')
+class SalespersonLaptopCommissionTests(TestCase):
+    """On a rep laptop the server makes commission payments and the laptop
+    pulls the result (sync.client.submit_commission_action); the network is
+    mocked here. Staff and commission changes wait for a sync under the
+    current policy."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        cls.rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+
+    def setUp(self):
+        from sync import registry
+        from sync.models import SyncState
+        self.client.force_login(self.rep)
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        sale = Sale.objects.create(employee=self.employee, total=Decimal('5000'),
+                                   created_at=_local(2026, 9, 10))
+        # As pulled from the server: a laptop works out no commissions.
+        with apply_guard():
+            Commission.objects.create(employee=self.employee, sale=sale, amount=Decimal('500'))
+        state = SyncState.get()
+        state.pull_policy = registry.pull_policy('salesperson')
+        state.save()
+        SyncOutbox.objects.all().delete()
+
+    def submit(self, url, data, reply):
+        with mock.patch('sync.client.push') as push, \
+                mock.patch('sync.client.pull') as pull, \
+                mock.patch('sync.client._post', side_effect=reply) as post:
+            resp = self.client.post(url, data)
+        return resp, push, pull, post
+
+    def shown(self, resp):
+        return ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+
+    def test_pay_is_made_by_the_server(self):
+        resp, push, pull, post = self.submit(
+            reverse('panel:commission_pay', args=[self.employee.pk]),
+            {'amount': '200', 'period_month': 9, 'period_year': 2026, 'note': 'n'},
+            lambda path, payload: {'ok': True, 'message': 'تم على الخادم'})
+        path, payload = post.call_args.args
+        self.assertEqual(path, '/sync/api/commission-payment/')
+        self.assertEqual(payload, {
+            'action': 'pay',
+            'target': {'label': 'panel.Employee', 'sync_id': str(self.employee.sync_id)},
+            'data': {'amount': '200', 'month': 9, 'year': 2026, 'note': 'n'},
+        })
+        push.assert_called_once()
+        pull.assert_called_once()
+        self.assertIn('تم على الخادم', self.shown(resp))
+        # Nothing paid here: the payment arrives with the pull.
+        self.assertFalse(CommissionPayment.objects.exists())
+        self.assertEqual(Commission.objects.get().paid_amount, Decimal('0'))
+
+    def test_server_refusal_is_shown(self):
+        refused = requests.Response()
+        refused.status_code = 409
+        refused._content = json.dumps({'ok': False, 'error': 'رصيد الشركة غير كافٍ'}).encode()
+        resp, _, pull, _ = self.submit(
+            reverse('panel:commission_pay', args=[self.employee.pk]),
+            {'amount': '200', 'period_month': 9, 'period_year': 2026},
+            requests.HTTPError(response=refused))
+        self.assertIn('رصيد الشركة غير كافٍ', self.shown(resp))
+        pull.assert_not_called()
+
+    def test_offline_is_refused(self):
+        resp, _, _, _ = self.submit(
+            reverse('panel:commission_pay', args=[self.employee.pk]),
+            {'amount': '200', 'period_month': 9, 'period_year': 2026},
+            requests.ConnectionError())
+        self.assertIn('تعذّر الاتصال بالخادم', self.shown(resp))
+
+    def test_edit_and_delete_are_made_by_the_server(self):
+        with apply_guard():
+            payment = CommissionPayment.objects.create(
+                employee=self.employee, amount=Decimal('300'), period_month=9, period_year=2026)
+        ok = lambda path, payload: {'ok': True, 'message': 'ok'}
+        _, _, _, post = self.submit(
+            reverse('panel:commission_payment_edit', args=[payment.pk]),
+            {'amount': '100', 'period_month': 9, 'period_year': 2026, 'note': ''}, ok)
+        self.assertEqual(post.call_args.args[1]['action'], 'edit')
+        self.assertEqual(post.call_args.args[1]['target'],
+                         {'label': 'panel.CommissionPayment', 'sync_id': str(payment.sync_id)})
+        _, _, _, post = self.submit(
+            reverse('panel:commission_payment_delete', args=[payment.pk]), {}, ok)
+        self.assertEqual(post.call_args.args[1]['action'], 'delete')
+        payment.refresh_from_db()  # still here until the pull removes it
+        self.assertEqual(payment.amount, Decimal('300'))
+        self.assertFalse(SyncOutbox.objects.exists())
+
+    def test_waits_for_a_sync_under_the_current_policy(self):
+        from sync.models import SyncState
+        state = SyncState.get()
+        state.pull_policy = ''  # last synced before commissions were opened to reps
+        state.save()
+        with mock.patch('sync.client._post') as post:
+            for resp in [
+                self.client.get(reverse('panel:employee_edit', args=[self.employee.pk])),
+                self.client.post(reverse('panel:employee_edit', args=[self.employee.pk]),
+                                 {'name': 'Rep', 'commission_percentage': '0'}),
+                self.client.post(reverse('panel:commission_pay', args=[self.employee.pk]),
+                                 {'amount': '200', 'period_month': 9, 'period_year': 2026}),
+            ]:
+                self.assertRedirects(resp, reverse('sync:status'), fetch_redirect_response=False)
+        post.assert_not_called()
+        self.employee.refresh_from_db()
+        self.assertEqual(self.employee.commission_percentage, Decimal('10'))
+
+    def test_percentage_change_syncs_up(self):
+        resp = self.client.post(reverse('panel:employee_edit', args=[self.employee.pk]),
+                                {'name': 'Rep', 'commission_percentage': '20', 'sales_target': '0'})
+        self.assertIn('بعد المزامنة', self.shown(resp))
+        self.assertTrue(SyncOutbox.objects.filter(
+            model_label='panel.Employee', sync_id=self.employee.sync_id).exists())
+        # The server re-rates it (see sync.engine._update_commissions).
+        self.assertEqual(Commission.objects.get().amount, Decimal('500'))
 
 
 @override_settings(SYNC_ROLE='server')
@@ -831,6 +952,68 @@ class CommissionTests(SaleFormTestMixin, TestCase):
         self.assertFalse(Commission.objects.exists())
 
 
+@override_settings(SYNC_ROLE='server')
+class EmployeeSaveRerateTests(TestCase):
+    """Saving an employee re-rates a partly paid commission only when the
+    percentage changed: re-rating works from the commission's own rate, which
+    an earlier re-rating leaves apart from any percentage."""
+
+    def setUp(self):
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.sale = Sale.objects.create(employee=self.employee, total=Decimal('1000'))
+        self.employee.recalculate_commissions()
+        Commission.objects.filter(sale=self.sale).update(paid_amount=Decimal('50'))
+
+    def amount(self):
+        return Commission.objects.get(sale=self.sale).amount
+
+    def test_new_percentage_rerates_then_a_rename_leaves_it(self):
+        self.employee.commission_percentage = Decimal('20')
+        self.employee.save()
+        self.assertEqual(self.amount(), Decimal('150'))  # 50 paid + the unpaid 50 at 20%
+        self.employee.name = 'Renamed'
+        self.employee.save()
+        self.assertEqual(self.amount(), Decimal('150'))
+
+    def test_edit_page_keeping_the_percentage_leaves_it(self):
+        Commission.objects.filter(sale=self.sale).update(amount=Decimal('150'))
+        user = get_user_model().objects.create_user('boss', password='pw12345!x')
+        user.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.client.force_login(user)
+        self.client.post(reverse('panel:employee_edit', args=[self.employee.pk]),
+                         {'name': 'Renamed', 'commission_percentage': '10', 'sales_target': '0'})
+        self.assertEqual(self.amount(), Decimal('150'))
+
+
+@override_settings(SYNC_ROLE='server')
+class SaleCommissionsPageTests(TestCase):
+    """The commissions page lists every commission by employee, optionally
+    for one day's sales."""
+
+    def setUp(self):
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        Sale.objects.create(employee=self.employee, total=Decimal('1234'),
+                            created_at=_local(2026, 9, 10))
+        Sale.objects.create(employee=self.employee, total=Decimal('5000'),
+                            created_at=_local(2026, 9, 11))
+        self.employee.recalculate_commissions()
+        rep = get_user_model().objects.create_user('rep', password='pw12345!x')
+        rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+        self.client.force_login(rep)
+
+    def test_lists_commissions_with_the_employee_total(self):
+        resp = self.client.get(reverse('panel:sale_commissions'))
+        self.assertContains(resp, '123.40')
+        self.assertContains(resp, '623.40')
+
+    def test_filters_by_day(self):
+        resp = self.client.get(reverse('panel:sale_commissions'), {'date': '2026-09-11'})
+        self.assertNotContains(resp, '123.40')
+        self.assertContains(resp, '500.00')
+        resp = self.client.get(reverse('panel:sale_commissions'), {'date': 'garbage'})
+        self.assertContains(resp, '623.40')
+
+
 def _run_migration(name, function):
     """Call a data migration's function with the models as of that migration,
     as ``migrate`` does (no custom save() methods or signals)."""
@@ -941,10 +1124,65 @@ class CommissionPaymentTests(TestCase):
         self.assertEqual(list(payment.commissions.all()),
                          [Commission.objects.get(sale=self.september)])
 
-    def test_payment_over_the_months_unpaid_refused(self):
-        self.pay('600000', 9)  # within the 800000 owed overall, but not September's
+    def test_payment_beyond_its_month_pays_the_other_months(self):
+        # More than September's 500000, within the 800000 owed overall: the
+        # rest goes to June, as a payment of its own recorded against June.
+        self.pay('600000', 9)
+        self.assertEqual(self.unpaid(9), Decimal('0'))
+        self.assertEqual(self.unpaid(6), Decimal('200000'))
+        september, june = CommissionPayment.objects.order_by('-period_month')
+        self.assertEqual((september.amount, september.period_month), (Decimal('500000'), 9))
+        self.assertEqual((june.amount, june.period_month), (Decimal('100000'), 6))
+        self.assertEqual(september.paid_at, june.paid_at)
+        self.assertEqual(list(june.commissions.all()), [Commission.objects.get(sale=self.june)])
+
+    def test_other_months_go_oldest_first(self):
+        may = Sale.objects.create(employee=self.employee, total=Decimal('1000000'),
+                                  created_at=_local(2026, 5, 10))
+        self.employee.recalculate_commissions()
+        self.pay('700000', 9)  # September's 500000, then May's 100000, then June
+        self.assertEqual(self.employee.get_unpaid_commission(month=5, year=2026), Decimal('0'))
+        self.assertEqual(self.unpaid(6), Decimal('200000'))
+        self.assertEqual([(p.period_month, p.amount) for p in CommissionPayment.objects.order_by('pk')],
+                         [(9, Decimal('500000')), (5, Decimal('100000')), (6, Decimal('100000'))])
+        self.assertEqual(Commission.objects.get(sale=may).paid_amount, Decimal('100000'))
+
+    def test_month_with_nothing_unpaid_pays_the_others(self):
+        self.pay('500000', 9)
+        resp = self.pay('100000', 9)
+        payment = CommissionPayment.objects.latest('pk')
+        self.assertEqual((payment.amount, payment.period_month), (Decimal('100000'), 6))
+        self.assertEqual(self.unpaid(6), Decimal('200000'))
+        self.assertIn('2026-06', ' '.join(str(m) for m in get_messages(resp.wsgi_request)))
+
+    def test_payment_over_everything_unpaid_refused(self):
+        self.pay('800001', 9)
         self.assertFalse(CommissionPayment.objects.exists())
-        self.assertEqual(self.unpaid(9), Decimal('500000'))
+        self.assertEqual((self.unpaid(9), self.unpaid(6)), (Decimal('500000'), Decimal('300000')))
+
+    def test_month_owed_back_is_neither_paid_nor_a_cap(self):
+        # July's paid commission is cancelled with its sale: July is owed back,
+        # and keeps that; the others can still be paid in full.
+        july = Sale.objects.create(employee=self.employee, total=Decimal('2000000'),
+                                   created_at=_local(2026, 7, 10))
+        self.employee.recalculate_commissions()
+        self.pay('200000', 7)
+        july.delete()
+        self.assertEqual(self.unpaid(7), Decimal('-200000'))
+        self.pay('800000', 9)
+        self.assertEqual((self.unpaid(9), self.unpaid(6), self.unpaid(7)),
+                         (Decimal('0'), Decimal('0'), Decimal('-200000')))
+        self.assertEqual(CommissionPayment.objects.count(), 3)
+
+    def test_employee_page_shows_the_other_months_and_the_cap(self):
+        self.pay('100000', 9)
+        resp = self.client.get(reverse('panel:employee_detail', args=[self.employee.pk]),
+                               {'month': 9, 'year': 2026})
+        self.assertEqual(resp.context['payable_commission'], Decimal('700000'))
+        self.assertEqual(resp.context['other_months_unpaid'],
+                         [{'month': 6, 'year': 2026, 'unpaid': Decimal('300000')}])
+        self.assertContains(resp, '2026-06')
+        self.assertContains(resp, 'max="700000')
 
     def test_leftover_goes_to_oldest_other_month(self):
         CommissionPayment.objects.create(employee=self.employee, amount=Decimal('600000'),
@@ -958,6 +1196,97 @@ class CommissionPaymentTests(TestCase):
         self.pay('500000', 9)
         commission.refresh_from_db()
         self.assertGreater(commission.sync_updated_at, before)
+
+
+@override_settings(SYNC_ROLE='server')
+class SaleDetailCollectionTests(TestCase):
+    """The sale page shows what the customer has paid of it and the commission
+    those payments have earned the employee: the same share of
+    the commission as of the total collected. A 10% employee's 1000 sale, with
+    payments of 300 and then 200."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.manager = User.objects.create_user('boss', password='pw12345!x')
+        self.manager.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.rep = User.objects.create_user('rep', password='pw12345!x')
+        self.rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
+        self.employee = Employee.objects.create(name='Rep', commission_percentage=Decimal('10'))
+        self.sale = Sale.objects.create(employee=self.employee, total=Decimal('1000'),
+                                        created_at=_local(2026, 9, 1))
+        self.employee.recalculate_commissions()
+        self.invoice = Invoice.objects.create(sale=self.sale, total=Decimal('1000'))
+        # Entered out of order: listed by when they were paid.
+        InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('200'),
+                                      paid_at=_local(2026, 9, 20))
+        InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('300'),
+                                      paid_at=_local(2026, 9, 10))
+
+    def page(self, user=None, sale=None):
+        self.client.force_login(user or self.manager)
+        return self.client.get(reverse('panel:sale_detail', args=[(sale or self.sale).pk]))
+
+    def test_collection_shown_to_everyone(self):
+        for user in (self.manager, self.rep):
+            collection = self.page(user).context['collection']
+            self.assertEqual((collection['collected'], collection['remaining'], collection['percent'],
+                              collection['count']),
+                             (Decimal('500'), Decimal('500'), Decimal('50'), 2))
+            self.assertEqual([(r['payment'].amount, r['collected']) for r in collection['rows']],
+                             [(Decimal('300'), Decimal('300')), (Decimal('200'), Decimal('500'))])
+
+    def test_manager_sees_commission_earned_on_collections(self):
+        resp = self.page()
+        commission = resp.context['commission']
+        self.assertEqual((commission['amount'], commission['earned'], commission['uncollected'],
+                          commission['paid'], commission['earned_unpaid']),
+                         (Decimal('100'), Decimal('50'), Decimal('50'), Decimal('0'), Decimal('50')))
+        self.assertEqual([r['commission'] for r in resp.context['collection']['rows']],
+                         [Decimal('30'), Decimal('20')])
+        self.assertContains(resp, 'العمولة المكتسبة من التحصيل')
+
+    def test_salesperson_sees_the_commission_too(self):
+        # Reps manage commissions, so they see what a sale has earned too.
+        resp = self.page(self.rep)
+        self.assertEqual(resp.context['commission']['earned'], Decimal('50'))
+        self.assertEqual([r['commission'] for r in resp.context['collection']['rows']],
+                         [Decimal('30'), Decimal('20')])
+        self.assertContains(resp, 'العمولة المكتسبة من التحصيل')
+
+    def test_commission_paid_ahead_of_collection(self):
+        CommissionPayment.objects.create(employee=self.employee, amount=Decimal('80'),
+                                         period_month=9, period_year=2026)
+        commission = self.page().context['commission']
+        self.assertEqual((commission['paid'], commission['earned_unpaid'], commission['paid_ahead']),
+                         (Decimal('80'), Decimal('0'), Decimal('30')))
+
+    def test_payment_shares_add_up_to_what_is_earned(self):
+        # A third of 0.10 each rounds to 0.03; the running total keeps them at 0.10.
+        sale = Sale.objects.create(employee=self.employee, total=Decimal('3'))
+        Commission.objects.create(employee=self.employee, sale=sale, amount=Decimal('0.10'))
+        invoice = Invoice.objects.create(sale=sale, total=Decimal('3'))
+        for day in (1, 2, 3):
+            InvoicePayment.objects.create(invoice=invoice, amount=Decimal('1'),
+                                          paid_at=_local(2026, 9, day))
+        resp = self.page(sale=sale)
+        self.assertEqual([r['commission'] for r in resp.context['collection']['rows']],
+                         [Decimal('0.03'), Decimal('0.04'), Decimal('0.03')])
+        self.assertEqual(resp.context['commission']['earned'], Decimal('0.10'))
+
+    def test_collected_beyond_a_return_earns_the_whole_commission(self):
+        InvoicePayment.objects.create(invoice=self.invoice, amount=Decimal('500'))
+        Sale.objects.filter(pk=self.sale.pk).update(total=Decimal('800'))
+        Commission.objects.filter(sale=self.sale).update(amount=Decimal('80'))
+        resp = self.page()
+        self.assertEqual(resp.context['collection']['percent'], Decimal('100'))
+        self.assertEqual(resp.context['commission']['earned'], Decimal('80'))
+
+    def test_sale_without_invoice_or_employee(self):
+        sale = Sale.objects.create(total=Decimal('500'))
+        resp = self.page(sale=sale)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context['collection']['collected'], Decimal('0'))
+        self.assertIsNone(resp.context['commission'])
 
 
 @override_settings(SYNC_ROLE='server')
@@ -1223,17 +1552,27 @@ class CommissionPaymentEditDeleteTests(_CommissionPaymentPagesMixin, TestCase):
         self.assertContains(resp, reverse('panel:commission_payment_edit', args=[payment.pk]))
         self.assertContains(resp, reverse('panel:commission_payment_delete', args=[payment.pk]))
 
-    def test_salesperson_cannot_edit_or_delete(self):
-        payment = self.pay('500000', 9)
+    def test_salesperson_edits_and_deletes(self):
+        payment = self.pay('300000', 9)
         self.login_salesperson()
         edit_url = reverse('panel:commission_payment_edit', args=[payment.pk])
-        self.assertRedirects(self.client.get(edit_url), reverse('panel:sale_list'),
-                             fetch_redirect_response=False)
-        self.client.post(edit_url, {'amount': '1', 'period_month': 9, 'period_year': 2026})
+        self.assertEqual(self.client.get(edit_url).status_code, 200)
+        self.edit(payment, '200000', 9)
+        self.assertEqual(self.unpaid(9), Decimal('300000'))
         self.delete(payment)
+        self.assertFalse(CommissionPayment.objects.exists())
+        self.assertEqual(self.unpaid(9), Decimal('500000'))
+
+    def test_salesperson_short_of_cash_is_not_shown_the_balance(self):
+        payment = self.pay('300000', 9)
+        self.login_salesperson()
+        resp = self.edit(payment, '400000', 9, balance='12345')
         payment.refresh_from_db()
-        self.assertEqual(payment.amount, Decimal('500000'))
-        self.assertEqual(self.unpaid(9), Decimal('0'))
+        self.assertEqual(payment.amount, Decimal('300000'))
+        html = resp.content.decode() + ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+        self.assertIn('رصيد الشركة من الجنيه السوداني غير كافٍ لتغطية زيادة العمولة (100000', html)
+        self.assertNotIn('12345', html)
+        self.assertNotIn('12,345', html)
 
 
 @override_settings(SYNC_ROLE='server')
@@ -1361,12 +1700,23 @@ class ManagerCommissionPaymentEditDeleteTests(_CommissionPaymentPagesMixin, Test
         self.edit(payment, '10000', balance='0')
         self.assertEqual(self.amount_of(payment), Decimal('10000'))
 
-    def test_salesperson_cannot_edit_or_delete(self):
-        payment = self.pay('60000')
+    def test_salesperson_pays_edits_and_deletes(self):
         self.login_salesperson()
+        self.pay_view('60000')
+        payment = ManagerCommissionPayment.objects.get()
+        self.assertEqual(payment.amount, Decimal('60000'))
         self.edit(payment, '1')
+        self.assertEqual(self.amount_of(payment), Decimal('1'))
         self.client.post(reverse('panel:manager_commission_payment_delete', args=[payment.pk]))
-        self.assertEqual(self.amount_of(payment), Decimal('60000'))
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+
+    def test_salesperson_short_of_cash_is_not_shown_the_balance(self):
+        self.login_salesperson()
+        resp = self.pay_view('60000', balance='12345')
+        self.assertFalse(ManagerCommissionPayment.objects.exists())
+        shown = ' '.join(str(m) for m in get_messages(resp.wsgi_request))
+        self.assertIn('رصيد الشركة من الجنيه السوداني غير كافٍ', shown)
+        self.assertNotIn('12345', shown)
 
 
 @override_settings(SYNC_ROLE='server')
@@ -1589,16 +1939,26 @@ class SaleDeleteOwesBackCommissionTests(TestCase):
             [str(m) for m in get_messages(resp.wsgi_request) if m.level_tag == 'warning'],
             ['خُصم 500.00 من عمولة المندوب Rep غير المدفوعة، لأن عمولة الفاتورة المحذوفة كانت مدفوعة له.'])
 
-    def test_salesperson_sees_no_commission_but_it_is_still_owed_back(self):
+    def test_salesperson_is_told_what_is_owed_back_too(self):
         self.pay('500')
         rep = get_user_model().objects.create_user('rep', password='pw12345!x')
         rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
         self.client.force_login(rep)
         resp = self.client.get(reverse('panel:sale_delete', args=[self.small.pk]))
-        self.assertEqual(resp.status_code, 200)
-        self.assertNotContains(resp, 'مدفوعة للمندوب')
+        self.assertContains(resp, 'عمولة هذه الفاتورة مدفوعة للمندوب Rep (500.00)')
         self.delete_sale(self.small)
         self.assertEqual(self.unpaid(), Decimal('9500'))
+
+    @override_settings(SYNC_ROLE='salesperson')
+    def test_salesperson_laptop_leaves_the_owing_back_to_the_server(self):
+        # Its commission rows aren't pushed: the server owes it back itself
+        # when the deletion arrives (see sync.engine._owe_back_commissions).
+        payment = self.pay('500')
+        SyncOutbox.objects.all().delete()
+        self.delete_sale(self.small)
+        payment.refresh_from_db()
+        self.assertEqual(payment.cancelled, {})
+        self.assertFalse(SyncOutbox.objects.filter(model_label='panel.CommissionPayment').exists())
 
     def test_employee_page_explains_what_is_owed_back(self):
         self.pay('10500')
@@ -1769,12 +2129,14 @@ class ReturnOwesBackCommissionTests(SaleFormTestMixin, TestCase):
         self.pay('300')
         self.assertEqual(self.warnings(self.return_units(1)), [])
 
-    def test_salesperson_return_is_charged_without_showing_it(self):
+    def test_salesperson_is_told_of_the_charge_too(self):
         self.pay('600')
         rep = get_user_model().objects.create_user('rep', password='pw12345!x')
         rep.groups.add(Group.objects.get_or_create(name=SALESPERSON_GROUP)[0])
         self.client.force_login(rep)
-        self.assertEqual(self.warnings(self.return_units(1)), [])
+        warnings = self.warnings(self.return_units(1))
+        self.assertEqual(len(warnings), 1)
+        self.assertIn('خُصم 200.00 من عمولة المندوب Rep', warnings[0])
         self.assertEqual(self.unpaid(), Decimal('-200'))
 
     def test_manager_commission_follows_the_return(self):

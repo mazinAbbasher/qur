@@ -21,9 +21,12 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from decimal import Decimal
+
 from .engine import apply_batch
 from .models import SyncLog, SyncOutbox, SyncState
-from .serializers import get_model, serialize_instance
+from .registry import pull_policy
+from .serializers import get_model, model_label, serialize_instance
 
 
 class SyncNotConfigured(Exception):
@@ -119,6 +122,54 @@ def submit_currency_exchange(exchange):
     with apply_guard():
         exchange.save()
     return None
+
+
+def submit_commission_action(action, target, data=None):
+    """Salesperson laptop: have the server carry out a commission-payment
+    ``action`` on ``target`` (see panel.views.commission_action). Only the
+    server holds the company's cash to check a payment against, and the final
+    say on the commissions it pays. Returns (ok, message) for the page: the
+    server's own message, which never shows the balance.
+
+    Our pending outbox is pushed first, so the server has what this laptop
+    changed (a new employee, a sale); afterwards we pull, so the payment and
+    the commissions it paid show here at once.
+    """
+    import requests
+
+    payload = {
+        'action': action,
+        'target': {'label': model_label(type(target)), 'sync_id': str(target.sync_id)},
+        'data': {k: str(v) if isinstance(v, Decimal) else v for k, v in (data or {}).items()},
+    }
+    try:
+        push()
+        reply = _post('/sync/api/commission-payment/', payload)
+    except requests.HTTPError as exc:
+        error = None
+        if exc.response is not None and exc.response.status_code == 409:
+            try:
+                error = exc.response.json().get('error')
+            except ValueError:
+                pass
+        return False, error or "تعذّر تسجيل العملية على الخادم. حاول مرة أخرى."
+    except Exception:  # offline / not configured / timeout
+        return False, "تعذّر الاتصال بالخادم. تأكد من الاتصال بالإنترنت ثم حاول مرة أخرى."
+    message = reply.get('message') or ''
+    try:
+        pull()
+    except Exception:
+        message += " ستظهر على هذا الجهاز بعد المزامنة القادمة."
+    return True, message
+
+
+def synced_with_current_policy():
+    """Salesperson laptop: was its last pull served under the policy this code
+    reads by? Until it is (no sync since an update, or a server not updated
+    yet) it may lack what its role now reads, such as commissions and staff
+    percentages before they were opened to reps, and the server may refuse
+    what it now writes."""
+    return SyncState.get().pull_policy == pull_policy('salesperson')
 
 
 def _clamped_cursor(server_cursor, deferred_min):

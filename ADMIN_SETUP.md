@@ -193,7 +193,7 @@ Start the app (see step 7), log in, and open the sync page:
   everything from the server.
 * **Salesperson laptop:** click **رفع بياناتي (Upload)** once. It downloads
   products, stock, prices, clients and all sales/invoices/payments. Costs,
-  commissions, expenses and finance data are never sent.
+  expenses and finance data are never sent.
 
 The page shows the role, server URL, last sync time and a green success message.
 If it fails, see [Troubleshooting](#troubleshooting).

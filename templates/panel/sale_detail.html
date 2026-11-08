@@ -153,18 +153,48 @@
           <h6 class="mb-0">الفاتورة</h6>
         </div>
         <div class="card-body">
-          <p><strong>الإجمالي:</strong> <span class="text-success">{{ invoice.sale.total|floatformat:2|intcomma }}
-              SDG</span></p>
-          <p><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d" }}</p>
-          <p>
-            <strong>المدفوع:</strong>
-            <span class="text-success">{{ invoice.paid_amount|floatformat:"2"|intcomma }} SDG</span>
-            <span class="mx-2"></span>
-            <strong>المتبقي:</strong>
-            <span class="{% if invoice.remaining_amount > 0 %}text-danger fw-bold{% else %}text-success{% endif %}">
-              {{ invoice.remaining_amount|floatformat:"2"|intcomma|intcomma }} SDG
-            </span>
-          </p>
+          <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">إجمالي البيع</div>
+                <div class="fw-bold">{{ collection.total|floatformat:2|intcomma }} SDG</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">المبلغ المحصل</div>
+                <div class="fw-bold text-success">{{ collection.collected|floatformat:2|intcomma }} SDG</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">المتبقي للتحصيل</div>
+                <div class="fw-bold {% if collection.remaining > 0 %}text-danger{% else %}text-success{% endif %}">
+                  {{ collection.remaining|floatformat:2|intcomma }} SDG
+                </div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">عدد الدفعات</div>
+                <div class="fw-bold">{{ collection.count }}</div>
+                {% if collection.last_paid_at %}
+                <div class="small text-muted">آخر دفعة: {{ collection.last_paid_at|date:"Y-m-d" }}</div>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          <div class="mb-3">
+            <div class="d-flex justify-content-between small mb-1">
+              <span>نسبة التحصيل</span>
+              <strong>{{ collection.percent|floatformat:1 }}%</strong>
+            </div>
+            <div class="progress" style="height: 10px;">
+              <div class="progress-bar bg-success" role="progressbar" style="width: {{ collection.percent|floatformat:'0u' }}%;"
+                aria-valuenow="{{ collection.percent|floatformat:'0u' }}" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+          </div>
+          <p><strong>تاريخ الاستحقاق:</strong> {{ invoice.due_date|date:"Y-m-d"|default:"-" }}</p>
           <p><strong>الحالة:</strong>
             {% if invoice.status == 'paid' %}
             <span class="badge bg-success">مدفوعة</span>
@@ -178,23 +208,28 @@
           <p><a href="{{ invoice.file_path }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i>
               تحميل الفاتورة</a></p>
           {% endif %}
-          {% if invoice.payments.exists %}
+          {% if collection.rows %}
           <div class="mt-4">
-            <h6>سجل الدفعات</h6>
+            <h6>سجل الدفعات (التحصيل)</h6>
             <table class="table table-sm table-bordered">
               <thead>
                 <tr>
                   <th>التاريخ</th>
                   <th>المبلغ</th>
+                  <th>إجمالي المحصل</th>
+                  {% if commission %}<th>العمولة المكتسبة</th>{% endif %}
                   <th>ملاحظة</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {% for p in invoice.payments.all %}
+                {% for row in collection.rows %}
+                {% with p=row.payment %}
                 <tr>
                   <td>{{ p.paid_at|date:"Y-m-d H:i" }}</td>
                   <td>{{ p.amount|floatformat:"2"|intcomma }}</td>
+                  <td>{{ row.collected|floatformat:"2"|intcomma }}</td>
+                  {% if commission %}<td>{{ row.commission|floatformat:"2"|intcomma }}</td>{% endif %}
                   <td>{{ p.note|default:"-" }}</td>
                   <td class="text-center text-nowrap">
                     <a href="{% url 'panel:invoice_edit_payment' invoice.pk p.pk %}"
@@ -208,8 +243,18 @@
                     </form>
                   </td>
                 </tr>
+                {% endwith %}
                 {% endfor %}
               </tbody>
+              <tfoot>
+                <tr class="table-light">
+                  <td><strong>الإجمالي</strong></td>
+                  <td><strong>{{ collection.collected|floatformat:"2"|intcomma }}</strong></td>
+                  <td></td>
+                  {% if commission %}<td><strong>{{ commission.earned|floatformat:"2"|intcomma }}</strong></td>{% endif %}
+                  <td colspan="2"></td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           {% endif %}
@@ -267,6 +312,81 @@
       </div>
       {% else %}
       <div class="alert alert-warning mt-4">لا توجد فاتورة مرتبطة بهذا البيع.</div>
+      {% endif %}
+      {% if commission %}
+      <div class="card mt-4">
+        <div class="card-header bg-light">
+          <h6 class="mb-0">عمولة المندوب: {{ commission.employee.name }}</h6>
+        </div>
+        <div class="card-body">
+          <p class="small text-muted mb-3">
+            تُحتسب العمولة المكتسبة على المبالغ المحصلة من العميل، لا على إجمالي البيع:
+            {{ commission.percentage|floatformat:2 }}% من {{ collection.collected|floatformat:2|intcomma }} SDG محصلة.
+          </p>
+          <div class="row g-3 mb-3">
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">نسبة العمولة</div>
+                <div class="fw-bold">{{ commission.percentage|floatformat:2 }}%</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">العمولة المكتسبة من التحصيل</div>
+                <div class="fw-bold text-success">{{ commission.earned|floatformat:2|intcomma }} SDG</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">المدفوع للمندوب</div>
+                <div class="fw-bold">{{ commission.paid|floatformat:2|intcomma }} SDG</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="border rounded p-2 h-100">
+                <div class="small text-muted">مكتسبة وغير مدفوعة</div>
+                <div class="fw-bold {% if commission.earned_unpaid > 0 %}text-danger{% endif %}">{{ commission.earned_unpaid|floatformat:2|intcomma }} SDG</div>
+              </div>
+            </div>
+          </div>
+          <table class="table table-sm table-bordered mb-0">
+            <tbody>
+              <tr>
+                <td>عمولة إجمالي البيع ({{ collection.total|floatformat:2|intcomma }} SDG)</td>
+                <td class="fw-bold">{{ commission.amount|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              <tr>
+                <td>العمولة المكتسبة من المحصل ({{ collection.collected|floatformat:2|intcomma }} SDG)</td>
+                <td class="text-success fw-bold">{{ commission.earned|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              <tr>
+                <td>عمولة المبلغ غير المحصل ({{ collection.remaining|floatformat:2|intcomma }} SDG)</td>
+                <td>{{ commission.uncollected|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              <tr>
+                <td>المدفوع للمندوب من عمولة هذا البيع</td>
+                <td>{{ commission.paid|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              {% if commission.paid_ahead > 0 %}
+              <tr>
+                <td>مدفوع للمندوب قبل التحصيل</td>
+                <td class="text-warning fw-bold">{{ commission.paid_ahead|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              {% endif %}
+              {% if commission.owed_back > 0 %}
+              <tr>
+                <td>مستحق على المندوب (عمولة مدفوعة أُلغيت بمرتجع)</td>
+                <td class="text-danger fw-bold">{{ commission.owed_back|floatformat:2|intcomma }} SDG</td>
+              </tr>
+              {% endif %}
+            </tbody>
+          </table>
+          <div class="mt-3">
+            <a href="{% url 'panel:employee_detail' commission.employee.pk %}?month={{ sale.created_at|date:'n' }}&year={{ sale.created_at|date:'Y' }}"
+              class="btn btn-sm btn-outline-primary mb-0">عمولات المندوب لشهر البيع</a>
+          </div>
+        </div>
+      </div>
       {% endif %}
     </div>
   </div>
