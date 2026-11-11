@@ -22,7 +22,7 @@ from django.utils.timezone import localtime
 from finance.models import Currency, CurrencyExchange, Partner, PartnerTransaction
 from panel.models import (
     Commission, CommissionPayment, Employee, Inventory, Invoice, InvoicePayment, Manager,
-    ManagerCommissionPayment, Product, ReturnedProduct, Sale, SaleItem, Shipment,
+    ManagerCommissionPayment, Product, ReturnedProduct, Sale, SaleItem, Shipment, Supplier,
 )
 from sync.models import SyncOutbox, SyncTombstone
 from sync.tracking import apply_guard
@@ -555,6 +555,92 @@ class InvoicePaymentEditTests(TestCase):
         queued = {(e.model_label, str(e.sync_id), e.deleted) for e in SyncOutbox.objects.all()}
         self.assertEqual(queued, {('panel.InvoicePayment', str(self.payment.sync_id), True),
                                   ('panel.Invoice', str(self.invoice.sync_id), False)})
+
+
+@override_settings(SYNC_ROLE='server')
+class ShipmentEditQuantityTests(TestCase):
+    """A shipment's quantity can be corrected after it was recorded: its stock
+    moves by the change, and it can't go below what already left the batch.
+    A 10-unit shipment with 4 units sold (6 in stock)."""
+
+    def setUp(self):
+        User = get_user_model()
+        manager = User.objects.create_user('boss', password='pw12345!x')
+        manager.groups.add(Group.objects.get_or_create(name=MANAGER_GROUP)[0])
+        self.client.force_login(manager)
+        self.product = Product.objects.create(name='Med A', exchange_rate=600)
+        self.supplier = Supplier.objects.create(name='Supplier')
+        self.shipment = Shipment.objects.create(
+            product=self.product, quantity=10, shipment_cost=Decimal('10'),
+            cost_usd=Decimal('2'), cost_sdg=Decimal('1200'), sale_sdg=Decimal('2000'),
+            batch_number='B1', expiry_date=date(2030, 1, 1), exchange_rate=600,
+            supplier=self.supplier)
+        self.inventory = Inventory.objects.create(
+            product=self.product, shipment=self.shipment, quantity=6)
+        self.url = reverse('panel:shipment_edit', args=[self.shipment.pk])
+
+    def edit(self, quantity, **changes):
+        return self.client.post(self.url, {
+            'product': self.product.pk, 'quantity': quantity, 'cost_usd': '2',
+            'exchange_rate': 600, 'sale_sdg': '2000', 'sale_usd': '', 'shipment_cost': '10',
+            'batch_number': 'B1', 'expiry_date': '2030-01-01', 'supplier': self.supplier.pk,
+            **changes})
+
+    def stored(self):
+        self.shipment.refresh_from_db()
+        self.inventory.refresh_from_db()
+        return self.shipment.quantity, self.inventory.quantity
+
+    def test_quantity_is_editable(self):
+        resp = self.client.get(self.url)
+        self.assertFalse(resp.context['form'].fields['quantity'].disabled)
+        self.assertTrue(resp.context['form'].fields['product'].disabled)
+        quantity_input = re.search(r'<input[^>]*name="quantity"[^>]*>', resp.content.decode()).group()
+        self.assertNotIn('disabled', quantity_input)
+        self.assertIn('min="4"', quantity_input)
+        self.assertContains(resp, 'خرج من هذه الشحنة 4 وحدة، والمتبقي في المخزن 6')
+
+    def test_more_adds_to_the_stock(self):
+        self.assertRedirects(self.edit(15), reverse('panel:shipment_list'),
+                             fetch_redirect_response=False)
+        self.assertEqual(self.stored(), (15, 11))
+        self.assertEqual(self.supplier.total_shipments_amount, Decimal('30'))
+
+    def test_less_takes_from_the_stock(self):
+        self.edit(7)
+        self.assertEqual(self.stored(), (7, 3))
+
+    def test_down_to_what_left_empties_the_stock(self):
+        self.edit(4)
+        self.assertEqual(self.stored(), (4, 0))
+
+    def test_below_what_left_is_refused(self):
+        resp = self.edit(3)
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('لا يمكن أن تكون الكمية أقل من 4', ' '.join(resp.context['form'].errors['quantity']))
+        self.assertContains(resp, 'تعديل الشحنة')  # still the edit page
+        self.assertEqual(self.stored(), (10, 6))
+
+    def test_stock_read_when_saving(self):
+        # A sale saved after the page was opened still counts.
+        Inventory.objects.filter(pk=self.inventory.pk).update(quantity=2)
+        self.assertEqual(self.edit(5).status_code, 200)
+        self.assertEqual(self.stored(), (10, 2))
+        self.edit(12)
+        self.assertEqual(self.stored(), (12, 4))
+
+    def test_other_changes_leave_the_stock_alone(self):
+        self.edit(10, batch_number='B2')
+        self.shipment.refresh_from_db()
+        self.assertEqual(self.shipment.batch_number, 'B2')
+        self.assertEqual(self.stored(), (10, 6))
+
+    def test_cost_refused_keeps_the_edit_page_and_the_quantity(self):
+        with mock.patch('panel.views.calculate_company_balance', return_value=Decimal('0')):
+            resp = self.edit(15, shipment_cost='500')
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'تعديل الشحنة')
+        self.assertEqual(self.stored(), (10, 6))
 
 
 class SaleFormTestMixin:

@@ -472,6 +472,9 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False,
         by_label[r['label']].append(r)
 
     touched_inventory_pks = set()
+    # A pushed shipment's batch: its stock is recomputed from its (possibly new)
+    # quantity. Resolved at the end, as its Inventory row may come later.
+    touched_shipment_pks = set()
     pushed_sale_pks = set()
     pushed_employee_pks = set()
     rerate_employee_pks = set()
@@ -506,6 +509,10 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False,
             touched_inventory_pks.add(obj.inventory_id)
         elif label == 'panel.ReturnedProduct' and obj.sale_item_id:
             touched_inventory_pks.add(obj.sale_item.inventory_id)
+        elif label == 'panel.Shipment':
+            # An edited quantity moves the stock by the change. The pushing
+            # laptop's own Inventory row may predate sales pushed here since.
+            touched_shipment_pks.add(obj.pk)
 
     def _handle(label, status, result):
         if status == 'applied' and not is_pull:
@@ -563,6 +570,10 @@ def apply_batch(rows, *, is_pull, node_name='', authoritative_inventory=False,
         # Authoritative stock recompute (server side, after applying a push).
         # select_for_update serialises concurrent pushes touching the same batch
         # so an oversell can't slip through when two reps sell it at once.
+        if authoritative_inventory and touched_shipment_pks:
+            from panel.models import Inventory
+            touched_inventory_pks.update(Inventory.objects.filter(
+                shipment_id__in=touched_shipment_pks).values_list('pk', flat=True))
         if authoritative_inventory and touched_inventory_pks:
             from panel.models import Inventory
             inventories = (Inventory.objects

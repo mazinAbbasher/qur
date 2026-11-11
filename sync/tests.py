@@ -651,6 +651,35 @@ class CompositeIdentityTests(SyncSetup):
         self.assertEqual(self.inventory.quantity, 9)
 
 
+class PushedShipmentQuantityTests(SyncSetup):
+    """A manager laptop edits a shipment's quantity: the server moves the
+    batch's stock by the change from its own count of what left it, not from
+    the laptop's copy of the stock, which may predate sales pushed since."""
+
+    def test_stock_recomputed_from_the_new_quantity(self):
+        # A rep's sale of 2 is in on the server; the laptop still counts 5.
+        sale = Sale.objects.create(total=Decimal('4000'))
+        SaleItem.objects.create(
+            sale=sale, inventory=self.inventory, quantity=2, price=Decimal('2000'))
+        Inventory.objects.filter(pk=self.inventory.pk).update(quantity=3)
+
+        apply_batch(
+            [row('panel.Shipment', self.shipment.sync_id, quantity=8),
+             row('panel.Inventory', self.inventory.sync_id, quantity=8)],  # its 5, plus 3
+            is_pull=False, node_name='mgr-1', authoritative_inventory=True)
+
+        self.shipment.refresh_from_db()
+        self.inventory.refresh_from_db()
+        self.assertEqual((self.shipment.quantity, self.inventory.quantity), (8, 6))
+
+    def test_pulled_shipment_leaves_stock_alone(self):
+        # A laptop takes the stock the server worked out as it comes.
+        apply_batch([row('panel.Shipment', self.shipment.sync_id, quantity=8)],
+                    is_pull=True, node_name='mgr-1')
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.quantity, 5)
+
+
 class FullSalesSyncTests(SyncSetup):
     """Sales, invoices, payments and returns are shared by every laptop: what the
     manager adds or deletes reaches the salespeople on their next sync."""

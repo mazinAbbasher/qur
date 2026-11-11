@@ -1571,10 +1571,11 @@ class ShipmentForm(forms.ModelForm):
         self.fields['sale_usd'].required = False
         self.fields['sale_usd'].widget.attrs.update({'class': 'form-control bg-light', 'step': '0.0001', 'min': 0, 'id': 'id_sale_usd', 'readonly': True})
         self.fields['supplier'].queryset = Supplier.objects.all()
-        # Only disable product field if editing (instance with pk)
+        # Only disable product field if editing (instance with pk). The
+        # quantity stays editable: shipment_edit moves the batch's stock by the
+        # change, and refuses to go below what already left it.
         if self.instance and getattr(self.instance, 'pk', None):
             self.fields['product'].disabled = True
-            self.fields['quantity'].disabled = True  # <-- make quantity uneditable when editing
 
 def shipment_create(request):
     products = Product.objects.all()
@@ -1614,13 +1615,17 @@ def shipment_create(request):
         "active_sidebar": "shipments"
     })
 
+def _shipment_units_out(quantity, inventory):
+    """How many of a shipment of ``quantity`` units already left its stock
+    (sold, given free or lost, less what was returned)."""
+    return max(quantity - inventory.quantity, 0) if inventory else 0
+
+
 def shipment_edit(request, pk):
-    shipment = get_object_or_404(Shipment, pk=pk)
+    from django.db import transaction
     from .models import Inventory
-    try:
-        inventory = Inventory.objects.get(shipment=shipment)
-    except Inventory.DoesNotExist:
-        inventory = None
+    shipment = get_object_or_404(Shipment, pk=pk)
+    inventory = Inventory.objects.filter(shipment=shipment).first()
     orig_quantity = shipment.quantity
     old_shipment_cost = shipment.shipment_cost
 
@@ -1636,48 +1641,37 @@ def shipment_edit(request, pk):
                     decrease_amount = sdg_cost - old_shipment_cost
                     if balance < decrease_amount:
                         form.add_error('shipment_cost', f"الرصيد الحالي للجنيه السوداني ({balance}) غير كافٍ لتغطية الزيادة في تكاليف الشحن ({decrease_amount}).")
-                        return render(request, 'shipments/shipment_form.html', {'form': form, 'active_sidebar': 'shipments'})
-            new_shipment = form.save(commit=False)
-
-            # Update inventory for this shipment
-            if inventory:
-                
-                inventory_qty_diff = new_shipment.quantity - orig_quantity
-                # print(inventory_qty_diff)
-                # print(orig_quantity)
-                # if orig_quantity < new_shipment.quantity:
-                #     # If quantity increased, just update the inventory
-                #     inventory.quantity += inventory_qty_diff
-                # elif orig_quantity > new_shipment.quantity:
-                #     # If quantity decreased, decrease the inventory
-                #     inventory.quantity -= inventory_qty_diff
-                # Ensure inventory quantity does not go negative
-                inventory.quantity += inventory_qty_diff
-                if inventory.quantity < 0:
-                    messages.error(request, "الكمية الجديدة لا يمكن أن تكون أقل من الصفر.")
-                    return render(request, 'shipments/shipment_form.html', {
-                        'form': form,
-                        'products': Product.objects.all(),
-                        'shipment': shipment,
-                        "active_sidebar": "shipments"
-                    })
-                inventory.product = new_shipment.product
-                inventory.save()
-            else:
-                Inventory.objects.create(
-                    product=new_shipment.product,
-                    shipment=new_shipment,
-                    quantity=new_shipment.quantity
-                )
-            # update cost_sdg
-            new_shipment.cost_sdg = float(new_shipment.cost_usd) * float(new_shipment.exchange_rate)
-            # Derive USD sale price from the clean SDG price the user entered.
-            if new_shipment.sale_sdg is not None and new_shipment.exchange_rate:
-                new_shipment.sale_usd = round(float(new_shipment.sale_sdg) / float(new_shipment.exchange_rate), 4)
-            new_shipment.save()
+        if form.is_valid():
+            with transaction.atomic():
+                # Re-read and lock the stock, so a sale saved meanwhile isn't lost.
+                inventory = Inventory.objects.select_for_update().filter(shipment=shipment).first()
+                # The stock moves by the change in quantity. What already left
+                # the batch stays gone, so the quantity can't go below it.
+                units_out = _shipment_units_out(orig_quantity, inventory)
+                if form.cleaned_data['quantity'] < units_out:
+                    form.add_error('quantity', f"لا يمكن أن تكون الكمية أقل من {units_out}: خرج من هذه الشحنة "
+                                               f"{units_out} وحدة (مبيعات أو بضاعة مجانية أو تالف).")
+                else:
+                    new_shipment = form.save(commit=False)
+                    if inventory:
+                        inventory.quantity += new_shipment.quantity - orig_quantity
+                        inventory.product = new_shipment.product
+                        inventory.save()
+                    else:
+                        Inventory.objects.create(
+                            product=new_shipment.product,
+                            shipment=new_shipment,
+                            quantity=new_shipment.quantity
+                        )
+                    # update cost_sdg
+                    new_shipment.cost_sdg = float(new_shipment.cost_usd) * float(new_shipment.exchange_rate)
+                    # Derive USD sale price from the clean SDG price the user entered.
+                    if new_shipment.sale_sdg is not None and new_shipment.exchange_rate:
+                        new_shipment.sale_usd = round(float(new_shipment.sale_sdg) / float(new_shipment.exchange_rate), 4)
+                    new_shipment.save()
+        if form.is_valid():
             messages.success(request, "تم تعديل الشحنة بنجاح.")
             return redirect('panel:shipment_list')
-        
     else:
         initial = {
             'batch_number': shipment.batch_number,
@@ -1689,6 +1683,13 @@ def shipment_edit(request, pk):
             'sale_sdg': shipment.sale_price_sdg,
         }
         form = ShipmentForm(instance=shipment, initial=initial)
+    if inventory is not None:
+        inventory.refresh_from_db()
+        units_out = _shipment_units_out(orig_quantity, inventory)
+        form.fields['quantity'].widget.attrs['min'] = max(units_out, 1)
+        form.fields['quantity'].help_text = (
+            f"خرج من هذه الشحنة {units_out} وحدة، والمتبقي في المخزن {inventory.quantity}. "
+            f"تعديل الكمية يغيّر المخزن بنفس الفرق، ولا يمكن أن تقل عن {units_out}.")
     return render(request, 'shipments/shipment_form.html', {
         'form': form,
         'products': Product.objects.all(),
