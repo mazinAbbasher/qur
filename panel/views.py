@@ -1364,7 +1364,7 @@ def sale_list_pdf(request):
     if area_id:
         sales = sales.filter(client__area_id=area_id)
     if status == "partial_or_unpaid":
-        sales = sales.filter(invoice__status__in["partial", "unpaid"])
+        sales = sales.filter(invoice__status__in=["partial", "unpaid"])
     elif status:
         sales = sales.filter(invoice__status=status)
     if employee_id:
